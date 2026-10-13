@@ -58,8 +58,8 @@ public class LangGraphInterviewClient {
         try {
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("sessionId", String.valueOf(sessionId));
-            body.put("resume", resume);
-            body.put("job", job);
+            body.put("resume", resumeContext(resume));
+            body.put("job", jobContext(job));
             body.put("difficulty", difficulty);
             return parse(post("/v1/interviews/start", body));
         } catch (Exception exception) {
@@ -73,8 +73,8 @@ public class LangGraphInterviewClient {
         try {
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("answer", answer);
-            body.put("resume", resume);
-            body.put("job", job);
+            body.put("resume", resumeContext(resume));
+            body.put("job", jobContext(job));
             return parse(post("/v1/interviews/" + sessionId + "/answer", body));
         } catch (Exception exception) {
             log.warn("LangGraph answer failed: {}", exception.getMessage());
@@ -82,6 +82,37 @@ public class LangGraphInterviewClient {
         }
     }
 
+    private Map<String, Object> resumeContext(ResumeView resume) {
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("targetRole", resume.targetRole());
+        context.put("city", resume.city());
+        context.put("education", resume.education());
+        context.put("school", resume.school());
+        context.put("major", resume.major());
+        context.put("graduationYear", resume.graduationYear());
+        context.put("skills", resume.skills());
+        context.put("projects", resume.projects());
+        context.put("experiences", resume.experiences());
+        context.put("selfEvaluation", resume.selfEvaluation());
+        return context;
+    }
+
+    private Map<String, Object> jobContext(JobView job) {
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("title", job.title());
+        context.put("company", job.company());
+        context.put("city", job.city());
+        context.put("salary", job.salary());
+        context.put("education", job.education());
+        context.put("experience", job.experience());
+        context.put("skills", job.skills());
+        context.put("description", job.description());
+        context.put("jobDescription", job.jobDescription());
+        context.put("jobRequirements", job.jobRequirements());
+        context.put("contentOrigin", job.contentOrigin());
+        context.put("source", job.source());
+        return context;
+    }
     private AgentTurn parse(JsonNode response) {
         if (response == null) return null;
         List<String> tools = new ArrayList<>();
