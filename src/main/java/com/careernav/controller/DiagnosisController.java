@@ -1,0 +1,4 @@
+package com.careernav.controller;
+import com.careernav.common.ApiResponse;import com.careernav.domain.ApiModels.DiagnosisReport;import com.careernav.service.DiagnosisService;import org.springframework.web.bind.annotation.*;import java.util.List;
+@RestController @RequestMapping("/api/diagnoses")
+public class DiagnosisController {private final DiagnosisService service;public DiagnosisController(DiagnosisService service){this.service=service;}@GetMapping public ApiResponse<List<DiagnosisReport>> list(@RequestParam(required=false)Long resumeId){return ApiResponse.ok(service.list(resumeId));}@PostMapping public ApiResponse<DiagnosisReport> diagnose(@RequestBody com.careernav.domain.ApiModels.DiagnosisRequest request){return ApiResponse.ok("简历诊断完成",service.diagnose(request.resumeId(),request.jobId()));}@GetMapping("/latest/{resumeId}")public ApiResponse<DiagnosisReport> latest(@PathVariable Long resumeId){return ApiResponse.ok(service.latest(resumeId));}}

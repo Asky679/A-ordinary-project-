@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="面向计算机学生的职业发展智能导航平台">
+  <title>职航 CareerNav · 计算机学生职业发展导航</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="#" data-view-link="dashboard">
+        <span class="brand-mark"><i></i><i></i><i></i></span>
+        <span><strong>职航</strong><small>CareerNav</small></span>
+      </a>
+      <nav class="nav-list" aria-label="主导航">
+        <button class="nav-item active" data-view="dashboard"><span class="nav-icon">⌂</span><span>成长总览</span></button>
+        <button class="nav-item" data-view="resume"><span class="nav-icon">▤</span><span>简历工坊</span></button>
+        <button class="nav-item" data-view="jobs"><span class="nav-icon">⌕</span><span>岗位雷达</span></button>
+        <button class="nav-item" data-view="interview"><span class="nav-icon">◉</span><span>模拟面试</span></button>
+        <button class="nav-item" data-view="diagnosis"><span class="nav-icon">✓</span><span>简历诊断</span></button>
+        <button class="nav-item" data-view="learning"><span class="nav-icon">↗</span><span>学习路线</span></button>
+      </nav>
+      <div class="sidebar-agent">
+        <div class="agent-orbit"><span></span><b>AI</b></div>
+        <div><strong>单智能体在线</strong><small id="sidebar-agent-mode">正在检测...</small></div>
+        <span class="status-dot"></span>
+      </div>
+      <div class="sidebar-foot">
+        <span>MCP JOB FEED</span>
+        <strong id="mcp-status">等待连接</strong>
+      </div>
+    </aside>
+
+    <main class="main-area">
+      <header class="topbar">
+        <div class="topbar-title"><span class="eyebrow">CAREER INTELLIGENCE</span><h2 id="page-title">成长总览</h2></div>
+        <div class="topbar-actions">
+          <div class="system-pill"><span></span><b id="agent-mode-top">本地推理</b></div>
+          <button class="icon-button" id="refresh-btn" title="刷新数据">↻</button>
+          <button class="primary-button small" id="run-agent-top"><span>✦</span> 运行全链路</button>
+        </div>
+      </header>
+
+      <div class="content">
+        <section class="view active" id="view-dashboard">
+          <div class="hero-card">
+            <div class="hero-copy">
+              <span class="feature-tag"><i></i> 简历诊断为核 · 全链路职业导航</span>
+              <h1>让你的技术经历，<br><em>被招聘方真正看见。</em></h1>
+              <p>从简历编写到岗位匹配、模拟面试、诊断优化，由单智能体自主编排工具调用链，为计算机学生生成可执行的成长闭环。</p>
+              <div class="hero-actions">
+                <button class="primary-button" data-go="resume">开始编写简历 <span>→</span></button>
+                <button class="ghost-button" id="run-agent-hero"><span>✦</span> 一键智能体导航</button>
+              </div>
+              <div class="hero-proof">
+                <div><strong id="hero-jobs">--</strong><span>在库岗位</span></div>
+                <div><strong id="hero-score">--</strong><span>简历竞争力</span></div>
+                <div><strong>5</strong><span>智能体工具</span></div>
+              </div>
+            </div>
+            <div class="hero-visual">
+              <div class="radar-ring ring-1"></div><div class="radar-ring ring-2"></div><div class="radar-ring ring-3"></div>
+              <div class="radar-core"><span>简历</span><strong>诊断</strong><small>AI CORE</small></div>
+              <div class="orbit-node node-resume"><i>1</i><span>编写</span></div>
+              <div class="orbit-node node-job"><i>2</i><span>匹配</span></div>
+              <div class="orbit-node node-interview"><i>3</i><span>面试</span></div>
+              <div class="orbit-node node-diagnosis"><i>4</i><span>诊断</span></div>
+            </div>
+          </div>
+
+          <div class="stats-grid">
+            <article class="stat-card"><div class="stat-icon cyan">▤</div><div><span>我的简历</span><strong id="stat-resumes">0</strong><small>持续迭代版本</small></div></article>
+            <article class="stat-card"><div class="stat-icon amber">⌕</div><div><span>岗位机会</span><strong id="stat-jobs">0</strong><small id="stat-mcp">MCP 数据源</small></div></article>
+            <article class="stat-card"><div class="stat-icon violet">◎</div><div><span>综合竞争力</span><strong id="stat-score">--</strong><small>简历质量与岗位匹配综合</small></div></article>
+            <article class="stat-card"><div class="stat-icon green">↗</div><div><span>岗位匹配度</span><strong id="stat-match">--</strong><small>最高推荐岗位</small></div></article>
+          </div>
+
+          <div class="dashboard-grid">
+            <article class="panel workflow-panel">
+              <div class="panel-head"><div><span class="eyebrow">AGENT WORKFLOW</span><h3>职业发展闭环</h3></div><button class="text-button" id="workflow-run">立即运行 →</button></div>
+              <div class="workflow-line">
+                <div class="workflow-step done"><i>01</i><div><strong>结构化简历</strong><span>提炼技能与项目证据</span></div></div>
+                <div class="workflow-step active"><i>02</i><div><strong>岗位图谱匹配</strong><span>对齐薪资与技术需求</span></div></div>
+                <div class="workflow-step"><i>03</i><div><strong>模拟面试</strong><span>生成递进式追问</span></div></div>
+                <div class="workflow-step"><i>04</i><div><strong>诊断迭代</strong><span>形成优化行动清单</span></div></div>
+              </div>
+            </article>
+            <article class="panel agent-log-panel">
+              <div class="panel-head"><div><span class="eyebrow">AGENT PULSE</span><h3>智能体执行轨迹</h3></div><span class="live-badge"><i></i> LIVE</span></div>
+              <div id="dashboard-agent-log" class="mini-log">
+                <div><span>01</span><p><b>resume.profile</b> 等待任务</p></div>
+                <div><span>02</span><p><b>job.match</b> 等待任务</p></div>
+                <div><span>03</span><p><b>resume.diagnose</b> 等待任务</p></div>
+              </div>
+            </article>
+          </div>
+
+          <div class="dashboard-grid lower">
+            <article class="panel">
+              <div class="panel-head"><div><span class="eyebrow">TOP MATCHES</span><h3>优先机会</h3></div><button class="text-button" data-go="jobs">查看全部 →</button></div>
+              <div id="dashboard-jobs" class="compact-jobs"><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div></div>
+            </article>
+            <article class="panel diagnosis-preview">
+              <div class="panel-head"><div><span class="eyebrow">RESUME DIAGNOSIS</span><h3>最近诊断</h3></div><button class="text-button" data-go="diagnosis">重新诊断 →</button></div>
+              <div id="dashboard-diagnosis"><div class="empty-mini">运行诊断后查看质量与岗位匹配分析</div></div>
+            </article>
+          </div>
+        </section>
+
+                <section class="view" id="view-resume">
+          <div class="page-heading resume-page-heading">
+            <div><span class="eyebrow">RESUME WORKBENCH</span><h1>简历工坊</h1><p>参考 300 份真实简历模板，按结构化内容生成可投递的单页简历。</p></div>
+            <div class="heading-actions"><button class="ghost-button" id="new-resume">＋ 新建简历</button><button class="primary-button" id="save-resume">保存简历</button></div>
+          </div>
+          <div class="resume-workbench">
+            <form class="resume-editor-panel" id="resume-form">
+              <input type="hidden" id="resume-id">
+              <div class="editor-topline">
+                <div><span class="eyebrow">STRUCTURED EDITOR</span><h3>内容编辑</h3><p>先写事实，再让智能体做匹配与诊断。</p></div>
+                <div class="resume-completion"><div><span id="resume-completion-text">完成度 0%</span><b>实时预览</b></div><div class="completion-track"><i id="resume-completion-bar"></i></div></div>
+              </div>
+
+              <section class="editor-section">
+                <div class="form-section-title"><span>01</span><div><h3>基本信息</h3><p>联系方式只用于生成你的简历，不会展示给其他用户</p></div></div>
+                <div class="form-grid">
+                  <label><span>姓名 *</span><input id="owner-name" required placeholder="例如：林同学"></label>
+                  <label><span>目标岗位 *</span><input id="target-role" required placeholder="例如：Java 后端开发工程师"></label>
+                  <label><span>期望城市</span><input id="city" placeholder="长沙"></label>
+                  <label><span>毕业年份</span><input id="graduation-year" type="number" min="2024" max="2035" placeholder="2026"></label>
+                  <label><span>手机</span><input id="phone" placeholder="13800000000"></label>
+                  <label><span>邮箱</span><input id="email" type="email" placeholder="name@example.com"></label>
+                </div>
+              </section>
+
+              <section class="editor-section">
+                <div class="form-section-title"><span>02</span><div><h3>教育背景</h3><p>学历、学校、专业是岗位初筛的高频字段</p></div></div>
+                <div class="form-grid form-grid-3">
+                  <label><span>学历</span><select id="education"><option>本科</option><option>硕士</option><option>大专</option><option>博士</option></select></label>
+                  <label><span>学校</span><input id="school" placeholder="学校名称"></label>
+                  <label><span>专业</span><input id="major" placeholder="计算机科学与技术"></label>
+                </div>
+              </section>
+
+              <section class="editor-section">
+                <div class="form-section-title"><span>03</span><div><h3>专业技能</h3><p>点击选择主流技术，也可以补充自己的技术栈</p></div></div>
+                <input type="hidden" id="skills">
+                <div class="skill-picker" id="skill-picker">
+                  <div class="skill-group"><div class="skill-group-title"><b>编程语言</b><span>LANGUAGES</span></div><div class="skill-options">
+                    <button type="button" class="skill-option" data-skill="Java">Java</button><button type="button" class="skill-option" data-skill="Python">Python</button><button type="button" class="skill-option" data-skill="C++">C++</button><button type="button" class="skill-option" data-skill="C">C</button><button type="button" class="skill-option" data-skill="Go">Go</button><button type="button" class="skill-option" data-skill="JavaScript">JavaScript</button><button type="button" class="skill-option" data-skill="TypeScript">TypeScript</button><button type="button" class="skill-option" data-skill="SQL">SQL</button>
+                  </div></div>
+                  <div class="skill-group"><div class="skill-group-title"><b>后端与框架</b><span>BACKEND</span></div><div class="skill-options">
+                    <button type="button" class="skill-option" data-skill="Spring Boot">Spring Boot</button><button type="button" class="skill-option" data-skill="Spring Cloud">Spring Cloud</button><button type="button" class="skill-option" data-skill="MyBatis">MyBatis</button><button type="button" class="skill-option" data-skill="Django">Django</button><button type="button" class="skill-option" data-skill="Flask">Flask</button><button type="button" class="skill-option" data-skill="FastAPI">FastAPI</button><button type="button" class="skill-option" data-skill="Node.js">Node.js</button><button type="button" class="skill-option" data-skill="RESTful API">RESTful API</button>
+                  </div></div>
+                  <div class="skill-group"><div class="skill-group-title"><b>前端技术</b><span>FRONTEND</span></div><div class="skill-options">
+                    <button type="button" class="skill-option" data-skill="HTML5">HTML5</button><button type="button" class="skill-option" data-skill="CSS3">CSS3</button><button type="button" class="skill-option" data-skill="Vue">Vue</button><button type="button" class="skill-option" data-skill="React">React</button><button type="button" class="skill-option" data-skill="Webpack">Webpack</button><button type="button" class="skill-option" data-skill="Vite">Vite</button>
+                  </div></div>
+                  <div class="skill-group"><div class="skill-group-title"><b>数据库与中间件</b><span>DATA</span></div><div class="skill-options">
+                    <button type="button" class="skill-option" data-skill="MySQL">MySQL</button><button type="button" class="skill-option" data-skill="PostgreSQL">PostgreSQL</button><button type="button" class="skill-option" data-skill="Redis">Redis</button><button type="button" class="skill-option" data-skill="MongoDB">MongoDB</button><button type="button" class="skill-option" data-skill="Elasticsearch">Elasticsearch</button><button type="button" class="skill-option" data-skill="Kafka">Kafka</button>
+                  </div></div>
+                  <div class="skill-group"><div class="skill-group-title"><b>人工智能与数据</b><span>AI / DATA</span></div><div class="skill-options">
+                    <button type="button" class="skill-option" data-skill="PyTorch">PyTorch</button><button type="button" class="skill-option" data-skill="TensorFlow">TensorFlow</button><button type="button" class="skill-option" data-skill="LangChain">LangChain</button><button type="button" class="skill-option" data-skill="RAG">RAG</button><button type="button" class="skill-option" data-skill="MCP">MCP</button><button type="button" class="skill-option" data-skill="Pandas">Pandas</button><button type="button" class="skill-option" data-skill="NumPy">NumPy</button><button type="button" class="skill-option" data-skill="Prompt Engineering">Prompt Engineering</button>
+                  </div></div>
+                  <div class="skill-group"><div class="skill-group-title"><b>工程与测试</b><span>ENGINEERING</span></div><div class="skill-options">
+                    <button type="button" class="skill-option" data-skill="Git">Git</button><button type="button" class="skill-option" data-skill="Docker">Docker</button><button type="button" class="skill-option" data-skill="Linux">Linux</button><button type="button" class="skill-option" data-skill="Maven">Maven</button><button type="button" class="skill-option" data-skill="Gradle">Gradle</button><button type="button" class="skill-option" data-skill="CI/CD">CI/CD</button><button type="button" class="skill-option" data-skill="JUnit">JUnit</button><button type="button" class="skill-option" data-skill="Pytest">Pytest</button><button type="button" class="skill-option" data-skill="Selenium">Selenium</button><button type="button" class="skill-option" data-skill="Postman">Postman</button>
+                  </div></div>
+                </div>
+                <div class="selected-skill-area">
+                  <div class="selected-skill-head"><span>已选技能 <b id="skill-count">0</b> 项</span><small>点击标签可移除，继续选择不会重复</small></div>
+                  <div class="selected-skills" id="selected-skills"></div>
+                  <div class="custom-skill-row"><input id="custom-skill-input" placeholder="补充技能，例如 Unity、Flutter、Kubernetes"><button type="button" class="ghost-button" id="add-custom-skill">＋ 添加自定义技能</button></div>
+                </div>
+              </section>
+
+              <section class="editor-section">
+                <div class="form-section-title"><span>04</span><div><h3>项目经历</h3><p>建议用“做了什么 + 用了什么 + 结果如何”描述</p></div></div>
+                <div id="project-editor" class="project-editor"></div>
+                <button type="button" class="add-row-button" id="add-project">＋ 添加项目经历</button>
+              </section>
+
+              <section class="editor-section">
+                <div class="form-section-title"><span>05</span><div><h3>实习 / 工作经历</h3><p>突出个人职责、协作方式和可量化成果</p></div></div>
+                <div id="experience-editor" class="experience-editor"></div>
+                <button type="button" class="add-row-button" id="add-experience">＋ 添加实习 / 工作经历</button>
+              </section>
+
+              <section class="editor-section">
+                <div class="form-section-title"><span>06</span><div><h3>个人总结</h3><p>使用“方向 + 优势 + 目标”的表达结构</p></div></div>
+                <label class="full-field"><span>自我评价</span><textarea id="self-evaluation" rows="5" placeholder="计算机专业应届生，具备...，希望成长为..."></textarea></label>
+              </section>
+            </form>
+
+            <aside class="resume-preview-panel">
+              <div class="preview-toolbar">
+                <div><span class="eyebrow">LIVE A4 PREVIEW</span><h3>简历预览</h3><p>切换模板不会改变已填写内容</p></div>
+                <div class="resume-template-switcher" id="resume-template-switcher">
+                  <button type="button" class="active" data-resume-template="minimal"><span class="template-swatch swatch-minimal"></span><b>简约单页</b></button>
+                  <button type="button" data-resume-template="formal"><span class="template-swatch swatch-formal"></span><b>表格稳重</b></button>
+                  <button type="button" data-resume-template="english"><span class="template-swatch swatch-english"></span><b>英文专业</b></button>
+                </div>
+              </div>
+              <div class="resume-paper-viewport" id="resume-preview-viewport">
+                <article class="resume-paper template-minimal" id="resume-preview" aria-label="简历实时预览"></article>
+              </div>
+              <div class="preview-footer"><span>内容将自动适配 A4 单页比例</span><span>模板灵感来自 <a href="https://hicv.cn" target="_blank" rel="noreferrer">HICV 300 份简历模板</a></span></div>
+            </aside>
+          </div>
+        </section>
+
+        <section class="view" id="view-jobs">
+          <div class="page-heading">
+            <div><span class="eyebrow">JOB RADAR · MCP FEED</span><h1>岗位雷达</h1><p>实时汇聚岗位薪资与技术需求，按你的简历计算匹配优先级。</p></div>
+            <button class="ghost-button" id="refresh-jobs"><span>↻</span> 刷新岗位源</button>
+          </div>
+          <div class="filter-bar panel">
+            <label class="search-field"><span>⌕</span><input id="job-keyword" placeholder="搜索岗位、公司或技能"></label>
+            <select id="job-city-filter"><option value="">全部城市</option><option>杭州</option><option>上海</option><option>北京</option><option>深圳</option><option>成都</option><option>南京</option></select>
+            <select id="job-sort"><option value="match">按匹配度</option><option value="latest">按发布时间</option></select>
+            <span class="result-count" id="job-count">0 个机会</span>
+          </div>
+          <details class="match-weight-panel panel" id="match-weight-panel" open>
+            <summary>
+              <div><span class="eyebrow">MATCH POLICY</span><h3>匹配权重与城市偏好</h3><p>拖动权重后，系统会按新的占比重新计算匹配分。</p></div>
+              <span class="match-weight-summary" id="match-weight-summary">默认：技能 39% · 方向 22%</span>
+            </summary>
+            <div class="match-weight-grid">
+              <label class="match-weight-item"><span>技能匹配 <b data-weight-value="skills">35</b></span><input type="range" min="0" max="50" step="1" value="35" data-match-weight="skills"><small>岗位技能标签覆盖度，技能优先</small></label>
+              <label class="match-weight-item"><span>岗位方向 <b data-weight-value="role">20</b></span><input type="range" min="0" max="50" step="1" value="20" data-match-weight="role"><small>后端、前端、数据、AI、运维等岗位族匹配</small></label>
+              <label class="match-weight-item"><span>工作经验 <b data-weight-value="experience">15</b></span><input type="range" min="0" max="50" step="1" value="15" data-match-weight="experience"><small>实习、工作年限与岗位级别是否匹配</small></label>
+              <label class="match-weight-item"><span>学历背景 <b data-weight-value="education">10</b></span><input type="range" min="0" max="50" step="1" value="10" data-match-weight="education"><small>学历是否达到岗位门槛</small></label>
+              <label class="match-weight-item"><span>城市偏好 <b data-weight-value="city">5</b></span><input type="range" min="0" max="50" step="1" value="5" data-match-weight="city"><small>设为 0 后，城市不参与匹配加分或扣分</small></label>
+              <label class="match-weight-item"><span>项目证据 <b data-weight-value="evidence">5</b></span><input type="range" min="0" max="50" step="1" value="5" data-match-weight="evidence"><small>项目、实习以及量化成果对技能的佐证程度</small></label>
+            </div>
+            <div class="city-policy">
+              <div class="city-policy-head"><div><strong>不接受的工作城市</strong><small>加入后无论城市权重多高，都不会出现在岗位结果中</small></div><span id="excluded-city-count">0 个</span></div>
+              <div class="excluded-city-chips" id="excluded-city-chips"></div>
+              <div class="city-entry"><input id="excluded-city-input" placeholder="例如：成都、石家庄"><button type="button" class="ghost-button" id="add-excluded-city">＋ 添加城市</button></div>
+            </div>
+            <div class="match-weight-actions"><span id="match-weight-hint">当前权重会自动归一化到 100 分</span><div><button type="button" class="ghost-button" id="reset-match-weights">恢复默认</button><button type="button" class="primary-button" id="apply-match-weights">重新匹配</button></div></div>
+          </details>
+          <div id="job-list" class="job-list"><div class="loading-card"><i></i>正在读取 MCP 岗位流...</div></div>
+        </section>
+
+        <section class="view" id="view-interview">
+          <div class="page-heading">
+            <div><span class="eyebrow">AGENT INTERVIEW LAB</span><h1>模拟面试</h1><p>由 Agent 面试官读取岗位与项目经历，进行四轮动态追问、即时评分和针对性反馈。</p></div>
+            <span class="session-status" id="interview-status">尚未开始</span>
+          </div>
+          <div class="interview-layout">
+            <aside class="panel interview-setup">
+              <span class="eyebrow">SESSION SETUP</span><h3>配置面试</h3>
+              <label><span>选择简历</span><select id="interview-resume"></select></label>
+              <label><span>目标岗位</span><select id="interview-job"></select></label>
+              <label><span>面试强度</span><div class="segmented" id="interview-difficulty"><button class="active" data-value="标准">标准</button><button data-value="压力">压力</button></div></label>
+              <button class="primary-button full" id="start-interview">启动 AI 面试官 <span>→</span></button>
+              <div class="setup-note"><i>✦</i><p>Agent 会结合简历项目和岗位技能动态调整问题，根据每轮回答继续深挖，并给出可执行的改进建议。</p></div>
+            </aside>
+            <article class="panel chat-panel">
+              <div class="chat-head">
+                <div class="interviewer-avatar"><span>AI</span><i></i></div>
+                <div><strong>职航面试官</strong><small id="chat-job-title">等待选择目标岗位</small></div>
+                <div class="round-progress"><span id="round-text">0 / 4</span><div><i id="round-bar"></i></div></div>
+              </div>
+              <div id="chat-messages" class="chat-messages">
+                <div class="chat-empty"><div class="empty-orbit">AI</div><h3>准备好后开始面试</h3><p>系统将根据岗位技术栈与项目经历生成问题。</p></div>
+              </div>
+              <div class="answer-box">
+                <textarea id="interview-answer" rows="3" placeholder="输入你的回答，建议使用 STAR 结构并补充数据结果..."></textarea>
+                <div><span>Enter 发送 · Shift + Enter 换行</span><button class="primary-button" id="send-answer">发送回答 ↑</button></div>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="view" id="view-diagnosis">
+          <div class="page-heading">
+            <div><span class="eyebrow">AGENT RESUME DIAGNOSIS</span><h1>简历诊断</h1><p>分别计算简历质量与岗位匹配，并解释综合分来源，再由 Agent 生成技能缺口与优先级修改建议。</p></div>
+            <div class="diagnosis-actions"><select id="diagnosis-resume"></select><select id="diagnosis-job"></select><button class="primary-button" id="run-diagnosis">启动 Agent 诊断</button></div>
+          </div>
+          <div id="diagnosis-content" class="diagnosis-empty panel">
+            <div class="scan-illustration"><span></span><i>简历</i><b>AI</b></div><h3>等待诊断任务</h3><p>选择目标岗位，智能体会输出评分、关键词缺口和按优先级排序的修改建议。</p>
+          </div>
+        </section>
+
+        <section class="view" id="view-learning">
+          <div class="page-heading">
+            <div><span class="eyebrow">LEARNING NAVIGATOR</span><h1>学习路线</h1><p>根据技能图谱与岗位需求，把缺口拆成可交付、可验证的阶段计划。</p></div>
+            <div class="learning-controls"><input id="learning-role" value="Java 后端开发工程师"><button class="primary-button" id="generate-path">生成路线</button></div>
+          </div>
+          <div class="learning-grid">
+            <article class="panel path-panel">
+              <div class="panel-head"><div><span class="eyebrow">PERSONAL PATH</span><h3>阶段路线</h3></div><div class="readiness"><span>岗位准备度</span><strong id="readiness-score">--%</strong></div></div>
+              <div id="learning-summary" class="learning-summary">选择简历并生成学习路线后，这里会显示你的技能差距与阶段目标。</div>
+              <div id="learning-modules" class="learning-modules"></div>
+            </article>
+            <article class="panel graph-panel">
+              <div class="panel-head"><div><span class="eyebrow">SKILL GRAPH</span><h3>岗位技能图谱</h3></div><span class="legend"><i class="owned"></i>已掌握 <i></i>待提升</span></div>
+              <div id="skill-graph" class="skill-graph"></div>
+            </article>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div class="modal-backdrop" id="job-modal" aria-hidden="true">
+    <div class="modal">
+      <button class="modal-close" data-close-modal>×</button>
+      <div id="job-modal-content"></div>
+    </div>
+  </div>
+
+  <div class="agent-overlay" id="agent-overlay" aria-hidden="true">
+    <div class="agent-console">
+      <button class="modal-close" id="close-agent-overlay">×</button>
+      <div class="console-head"><div class="agent-orb"><span></span><b>AI</b></div><div><span class="eyebrow">AUTONOMOUS TOOL CHAIN</span><h2>职航智能体正在工作</h2><p id="agent-overlay-summary">正在分析简历与岗位图谱...</p></div></div>
+      <div id="agent-steps" class="agent-steps"></div>
+      <div class="console-foot"><span class="console-pulse"></span><p id="agent-console-status">初始化单智能体运行环境</p></div>
+    </div>
+  </div>
+
+  <div class="toast-stack" id="toast-stack"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

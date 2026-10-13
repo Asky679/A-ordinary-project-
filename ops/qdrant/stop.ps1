@@ -1,0 +1,1 @@
+Get-Process qdrant -ErrorAction SilentlyContinue | Stop-Process -Force`r`n

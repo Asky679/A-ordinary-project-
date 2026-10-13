@@ -1,0 +1,69 @@
+spring:
+  application:
+    name: career-navigation-platform
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://127.0.0.1:5432/careernav}
+    driver-class-name: org.postgresql.Driver
+    username: ${DB_USERNAME:careernav}
+    password: ${DB_PASSWORD:}
+  jpa:
+    open-in-view: false
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        format_sql: true
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+  web:
+    resources:
+      cache:
+        period: 0
+
+server:
+  port: ${SERVER_PORT:8080}
+  compression:
+    enabled: true
+
+logging:
+  level:
+    com.careernav: INFO
+    dev.langchain4j: INFO
+
+app:
+  agent:
+    api-key: ${OPENAI_API_KEY:}
+    base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
+    model: ${OPENAI_MODEL:gpt-4o-mini}
+    temperature: 0.2
+    timeout-seconds: 45
+  mcp:
+    enabled: ${MCP_ENABLED:false}
+    endpoint: ${MCP_ENDPOINT:http://localhost:3000/mcp}
+    tool-name: ${MCP_JOB_TOOL:search_jobs}
+    token: ${MCP_TOKEN:}
+    refresh-seconds: 900
+  collection:
+    expiry-cron: "${COLLECTION_EXPIRY_CRON:0 10 3 * * *}"
+    incremental-cron: "${COLLECTION_INCREMENTAL_CRON:0 20 3 * * MON}"
+    full-cron: "${COLLECTION_FULL_CRON:0 20 3 1 * *}"
+    stats-cron: "${COLLECTION_STATS_CRON:0 30 4 1 * *}"
+    stale-days: ${COLLECTION_STALE_DAYS:45}
+    expire-days: ${COLLECTION_EXPIRE_DAYS:60}
+    default-request-interval-ms: ${COLLECTION_REQUEST_INTERVAL_MS:3000}
+    max-request-interval-ms: ${COLLECTION_MAX_REQUEST_INTERVAL_MS:5000}
+    user-agent: "${COLLECTION_USER_AGENT:CareerNavDataBot/1.0}"
+    contact-email: "${COLLECTION_CONTACT_EMAIL:data-team@example.edu}"
+  qdrant:
+    base-url: "${QDRANT_URL:http://127.0.0.1:6333}"
+    api-key: "${QDRANT_API_KEY:}"
+    collection: "${QDRANT_COLLECTION:careernav_jobs}"
+    timeout-seconds: ${QDRANT_TIMEOUT_SECONDS:20}
+  embedding:
+    api-key: "${EMBEDDING_API_KEY:local}"
+    base-url: "${EMBEDDING_BASE_URL:http://127.0.0.1:5001/v1}"
+    model: "${EMBEDDING_MODEL:tfidf-svd-256}"
+    dimensions: ${EMBEDDING_DIMENSIONS:256}

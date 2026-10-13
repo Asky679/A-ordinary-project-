@@ -1,0 +1,17 @@
+target/
+data/
+.idea/
+*.iml
+.vscode/
+*.log
+*.tmp
+.DS_Store
+.ppt-build/
+output/
+tools/qdrant/storage/
+tools/qdrant/*.exe
+tools/qdrant/*.zip
+tools/qdrant/.qdrant-initialized
+ops/__pycache__/
+*.env
+application.local.yml

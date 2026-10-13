@@ -1,0 +1,5 @@
+package com.careernav.controller;
+import com.careernav.common.ApiResponse;import com.careernav.domain.ApiModels.*;import com.careernav.service.ResumeService;
+import jakarta.validation.Valid;import org.springframework.web.bind.annotation.*;import java.util.List;
+@RestController @RequestMapping("/api/resumes")
+public class ResumeController {private final ResumeService service;public ResumeController(ResumeService service){this.service=service;}@GetMapping public ApiResponse<List<ResumeView>> list(){return ApiResponse.ok(service.list());}@GetMapping("/{id}")public ApiResponse<ResumeView> get(@PathVariable Long id){return ApiResponse.ok(service.get(id));}@PostMapping public ApiResponse<ResumeView> create(@Valid @RequestBody ResumePayload payload){return ApiResponse.ok("简历已保存",service.create(payload));}@PutMapping("/{id}")public ApiResponse<ResumeView> update(@PathVariable Long id,@Valid @RequestBody ResumePayload payload){return ApiResponse.ok("简历已更新",service.update(id,payload));}@DeleteMapping("/{id}")public ApiResponse<Void> delete(@PathVariable Long id){service.delete(id);return ApiResponse.ok("简历已删除",null);}}
