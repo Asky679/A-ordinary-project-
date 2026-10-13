@@ -11,7 +11,7 @@ REPO = "Asky679/A-ordinary-project-"
 SOURCE = pathlib.Path(r"D:\何处是家乡\new pj")
 BRANCH = "main"
 AUTHOR = {"name": "Asky679", "email": "msh060719@qq.com"}
-EXCLUDED_PARTS = {".git", "target", ".ppt-build", "output", "data", "__pycache__", ".idea", ".vscode"}
+EXCLUDED_PARTS = {".git", "target", ".ppt-build", "output", "data", "__pycache__", ".venv", ".idea", ".vscode"}
 
 
 def token_from_git_credential():

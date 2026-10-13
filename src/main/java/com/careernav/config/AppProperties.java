@@ -77,6 +77,7 @@ public class AppProperties {
         public String getContactEmail() { return contactEmail; } public void setContactEmail(String v) { contactEmail = v; }
     }
 
+
     public static class Qdrant {
         private String baseUrl = "http://127.0.0.1:6333";
         private String apiKey;

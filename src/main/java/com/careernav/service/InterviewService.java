@@ -19,15 +19,17 @@ public class InterviewService {
     private final JobService jobService;
     private final JsonCodec jsonCodec;
     private final AgentModelClient agentModelClient;
+    private final LangGraphInterviewClient langGraphClient;
 
     public InterviewService(InterviewSessionRepository repository, ResumeService resumeService,
                             JobService jobService, JsonCodec jsonCodec,
-                            AgentModelClient agentModelClient) {
+                            AgentModelClient agentModelClient, LangGraphInterviewClient langGraphClient) {
         this.repository = repository;
         this.resumeService = resumeService;
         this.jobService = jobService;
         this.jsonCodec = jsonCodec;
         this.agentModelClient = agentModelClient;
+        this.langGraphClient = langGraphClient;
     }
 
     @Transactional
@@ -52,7 +54,20 @@ public class InterviewService {
         entity.setMessagesJson(jsonCodec.write(messages));
         entity.setStartedAt(LocalDateTime.now());
         entity.setUpdatedAt(entity.getStartedAt());
-        return toView(repository.save(entity));
+        entity = repository.save(entity);
+
+        if (langGraphClient.available()) {
+            LangGraphInterviewClient.AgentTurn turn = langGraphClient.start(entity.getId(), resume, job, difficulty);
+            if (turn != null && turn.question() != null && !turn.question().isBlank()) {
+                List<InterviewMessage> agentMessages = new ArrayList<>();
+                agentMessages.add(new InterviewMessage("assistant", turn.question(), LocalDateTime.now(), null, null));
+                entity.setMessagesJson(jsonCodec.write(agentMessages));
+                entity.setCurrentRound(Math.max(1, turn.round()));
+                entity.setUpdatedAt(LocalDateTime.now());
+                entity = repository.save(entity);
+            }
+        }
+        return toView(entity);
     }
 
     @Transactional
@@ -65,9 +80,43 @@ public class InterviewService {
                 jsonCodec.readList(entity.getMessagesJson(), InterviewMessage.class));
         JobView job = jobService.get(entity.getJobId());
         ResumeView resume = resumeService.get(entity.getResumeId());
+
+        if (langGraphClient.available()) {
+            LangGraphInterviewClient.AgentTurn turn = langGraphClient.answer(id, answer, resume, job);
+            if (turn != null) {
+                int score = turn.score() == null ? 60 : Math.max(45, Math.min(100, turn.score()));
+                String feedback = turn.feedback() == null || turn.feedback().isBlank()
+                        ? "已完成本轮回答评估。" : turn.feedback();
+                messages.add(new InterviewMessage("user", answer.trim(), LocalDateTime.now(), score, feedback));
+                messages.add(new InterviewMessage("assistant", feedback, LocalDateTime.now(), null, null));
+
+                int answered = entity.getCurrentRound();
+                int oldTotal = entity.getOverallScore() == null ? 0 : entity.getOverallScore();
+                entity.setOverallScore((int) Math.round(
+                        (oldTotal * (answered - 1) + score) / (double) answered));
+
+                if (turn.done() || answered >= entity.getTotalRounds()) {
+                    entity.setStatus("COMPLETED");
+                    entity.setCurrentRound(entity.getTotalRounds());
+                    messages.add(new InterviewMessage("assistant",
+                            "本场 LangGraph 面试已结束。Agent 已根据回答、岗位要求和会话记忆生成总结。",
+                            LocalDateTime.now(), null, null));
+                } else {
+                    entity.setCurrentRound(Math.max(answered + 1, turn.round()));
+                    String next = turn.question();
+                    if (next == null || next.isBlank()) {
+                        next = nextQuestion(entity.getCurrentRound(), resume, job);
+                    }
+                    messages.add(new InterviewMessage("assistant", next, LocalDateTime.now(), null, null));
+                }
+                entity.setMessagesJson(jsonCodec.write(messages));
+                entity.setUpdatedAt(LocalDateTime.now());
+                return toView(repository.save(entity));
+            }
+        }
+
         Evaluation evaluation = evaluate(answer, job, resume,
                 entity.getCurrentRound(), entity.getTotalRounds());
-
         messages.add(new InterviewMessage("user", answer.trim(), LocalDateTime.now(),
                 evaluation.score(), evaluation.feedback()));
         messages.add(new InterviewMessage("assistant", evaluation.feedback(), LocalDateTime.now(), null, null));

@@ -118,6 +118,43 @@ http://127.0.0.1:6333/collections/careernav_jobs
 ```text
 POST /api/jobs/vector/reindex?limit=5000
 ```
+## LangGraph 面试 Agent
+
+项目同时提供 Java LangChain4j 和 Python LangGraph 两层能力：
+
+- Spring Boot 负责简历、岗位、面试会话和数据库事务
+- LangGraph 负责自主规划、工具选择、回答评估、追问和会话记忆
+- 没有在线模型密钥时，LangGraph 使用本地规划器回退
+- Java 侧 `LANGGRAPH_ENABLED=false` 时继续使用原有 LangChain4j 面试逻辑
+
+启动 LangGraph 服务：
+
+```powershell
+cd interview-agent
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+powershell -ExecutionPolicy Bypass -File .\start.ps1
+```
+
+然后以启用 LangGraph 的方式启动 Spring Boot：
+
+```powershell
+.\mvnw.cmd -DskipTests package
+java -jar target\career-navigation-platform-1.0.0.jar `
+  --app.langgraph.enabled=true `
+  --app.langgraph.base-url=http://127.0.0.1:8001
+```
+
+工具链：
+
+```text
+read_session_context
+get_job_requirements
+search_question_bank
+evaluate_candidate_answer
+save_interview_memory
+get_interview_progress
+```
 ## 配置大模型
 
 不配置密钥时使用“LangChain4j 本地推理 + 工具链”，不依赖外网即可运行。接入 OpenAI 兼容接口：

@@ -57,6 +57,10 @@ app:
     max-request-interval-ms: ${COLLECTION_MAX_REQUEST_INTERVAL_MS:5000}
     user-agent: "${COLLECTION_USER_AGENT:CareerNavDataBot/1.0}"
     contact-email: "${COLLECTION_CONTACT_EMAIL:data-team@example.edu}"
+  langgraph:
+    enabled: ${LANGGRAPH_ENABLED:false}
+    base-url: ${LANGGRAPH_URL:http://127.0.0.1:8001}
+    timeout-seconds: ${LANGGRAPH_TIMEOUT_SECONDS:60}
   qdrant:
     base-url: "${QDRANT_URL:http://127.0.0.1:6333}"
     api-key: "${QDRANT_API_KEY:}"
