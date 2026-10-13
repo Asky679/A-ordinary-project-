@@ -56,6 +56,8 @@ def main():
             continue
         if path.suffix in {".exe", ".zip"}:
             continue
+        if path.name == ".env" or (path.name.startswith(".env.") and path.name != ".env.example"):
+            continue
         if relative.as_posix().startswith("tools/qdrant/"):
             continue
         tracked.append(relative.as_posix())

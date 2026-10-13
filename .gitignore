@@ -17,3 +17,4 @@ ops/__pycache__/
 application.local.yml
 interview-agent/.venv/
 interview-agent/__pycache__/
+interview-agent/.env
