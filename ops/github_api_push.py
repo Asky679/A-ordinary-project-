@@ -12,6 +12,7 @@ SOURCE = pathlib.Path(r"D:\何处是家乡\new pj")
 BRANCH = "main"
 AUTHOR = {"name": "Asky679", "email": "msh060719@qq.com"}
 EXCLUDED_PARTS = {".git", "target", ".ppt-build", "output", "data", "__pycache__", ".venv", ".idea", ".vscode"}
+EXCLUDED_SUFFIXES = {".exe", ".zip", ".log", ".tmp", ".pyc"}
 
 
 def token_from_git_credential():
@@ -54,7 +55,7 @@ def main():
         relative = path.relative_to(SOURCE)
         if any(part in EXCLUDED_PARTS for part in relative.parts):
             continue
-        if path.suffix in {".exe", ".zip"}:
+        if path.suffix.lower() in EXCLUDED_SUFFIXES:
             continue
         if path.name == ".env" or (path.name.startswith(".env.") and path.name != ".env.example"):
             continue
