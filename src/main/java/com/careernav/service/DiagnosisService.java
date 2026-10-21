@@ -21,18 +21,83 @@ public class DiagnosisService {
     private final JobService jobService;
     private final JsonCodec jsonCodec;
     private final AgentModelClient agentModelClient;
+    private final LearningPathService learningPathService;
+    private final LangGraphDiagnosisClient diagnosisClient;
 
     public DiagnosisService(DiagnosisReportRepository repository, ResumeService resumeService, JobService jobService,
-                            JsonCodec jsonCodec, AgentModelClient agentModelClient) {
+                            JsonCodec jsonCodec, AgentModelClient agentModelClient,
+                            LearningPathService learningPathService,
+                            LangGraphDiagnosisClient diagnosisClient) {
         this.repository = repository;
         this.resumeService = resumeService;
         this.jobService = jobService;
         this.jsonCodec = jsonCodec;
         this.agentModelClient = agentModelClient;
+        this.learningPathService = learningPathService;
+        this.diagnosisClient = diagnosisClient;
+    }
+
+    /**
+     * Agent 优先的诊断：先算确定性规则分，再让 LangGraph Agent 自主调用工具补充证据，
+     * 最后把 Agent 的建议合并回报告。Agent 不可用时自动退回纯规则诊断。
+     */
+    @Transactional
+    public DiagnosisReport diagnose(Long resumeId, Long jobId) {
+        DiagnosisReport base = diagnoseRuleBased(resumeId, jobId);
+        if (diagnosisClient == null || !diagnosisClient.available()) return base;
+        LangGraphDiagnosisClient.Enrichment enrichment = diagnosisClient.analyze(resumeId, jobId);
+        if (enrichment == null) return base;
+        return applyAgentEnrichment(base, enrichment);
+    }
+
+    private DiagnosisReport applyAgentEnrichment(DiagnosisReport base, LangGraphDiagnosisClient.Enrichment enrichment) {
+        List<String> strengths = new ArrayList<>(base.strengths());
+        for (String value : enrichment.strengths()) {
+            if (value != null && !value.isBlank() && strengths.size() < 8 && !strengths.contains(value)) {
+                strengths.add(clip(value, 180));
+            }
+        }
+
+        List<DiagnosisSuggestion> suggestions = new ArrayList<>();
+        for (LangGraphDiagnosisClient.Suggestion value : enrichment.suggestions()) {
+            if (suggestions.size() >= 8) break;
+            suggestions.add(new DiagnosisSuggestion(
+                    normalizePriority(value.priority()),
+                    safeText(value.category(), "Agent 建议"),
+                    safeText(value.issue(), "发现新的优化点"),
+                    safeText(value.action(), "结合岗位要求继续修改简历"),
+                    safeText(value.example(), "补充真实、可验证的项目结果")));
+        }
+        if (suggestions.isEmpty()) suggestions.addAll(base.suggestions());
+
+        String summary = enrichment.summary() == null || enrichment.summary().isBlank()
+                ? base.summary() : clip(enrichment.summary(), 400);
+
+        DiagnosisReport enriched = new DiagnosisReport(base.id(), base.resumeId(), base.jobId(), base.targetRole(),
+                base.overallScore(), base.resumeQualityScore(), base.jobMatchScore(), base.jobMatchLevel(),
+                base.level(), summary, base.dimensions(), base.jobMatchBreakdown(), strengths,
+                base.matchedKeywords(), base.missingKeywords(), suggestions,
+                enrichment.toolCalls(), base.learningPlan(), base.resumeUpdatedAt(), base.createdAt());
+
+        repository.findById(base.id()).ifPresent(entity -> {
+            entity.setReportJson(jsonCodec.write(enriched));
+            repository.save(entity);
+        });
+        return enriched;
     }
 
     @Transactional
-    public DiagnosisReport diagnose(Long resumeId, Long jobId) {
+    public DiagnosisReport diagnoseRuleBased(Long resumeId, Long jobId) {
+        return diagnoseRuleInternal(resumeId, jobId, true);
+    }
+
+    /** 只计算、不落库，供诊断 Agent 作为工具调用，避免产生额外的诊断记录。 */
+    @Transactional(readOnly = true)
+    public DiagnosisReport previewRuleBased(Long resumeId, Long jobId) {
+        return diagnoseRuleInternal(resumeId, jobId, false);
+    }
+
+    private DiagnosisReport diagnoseRuleInternal(Long resumeId, Long jobId, boolean persist) {
         ResumeView resume = resumeService.get(resumeId);
         JobView job = jobId == null ? null : jobService.get(jobId);
         JobRecommendation jobMatch = jobId == null ? null : jobService.evaluate(resume, jobId);
@@ -61,8 +126,12 @@ public class DiagnosisService {
 
         Set<String> matched = jobMatch == null ? Set.of() : new LinkedHashSet<>(jobMatch.matchedSkills());
         Set<String> missing = jobMatch == null ? Set.of() : new LinkedHashSet<>(jobMatch.missingSkills());
-        List<String> strengths = buildStrengths(qualityDimensions, jobMatch);
+        // buildStrengths() returns an immutable list (Stream.toList()); the Agent enrichment
+        // below appends to it, so wrap it in a mutable list first.
+        List<String> strengths = new ArrayList<>(buildStrengths(qualityDimensions, jobMatch));
         List<DiagnosisSuggestion> suggestions = new ArrayList<>(buildSuggestions(resume, qualityDimensions, matched, missing, jobMatch));
+
+        LearningPath learningPlan = learningPathService.generate(resumeId, targetRole);
 
         AiDiagnosis aiDiagnosis = enrichWithAgent(resume, targetRole, qualityDimensions, jobMatch, summary, suggestions, strengths);
         if (aiDiagnosis != null) {
@@ -82,7 +151,10 @@ public class DiagnosisService {
         DiagnosisReport draft = new DiagnosisReport(null, resume.id(), jobId, targetRole, overallScore,
                 resumeQualityScore, jobMatchScore, jobMatch == null ? "未选择岗位" : jobMatch.matchLevel(), level, summary,
                 qualityDimensions, jobMatch == null ? List.of() : jobMatch.scoreBreakdown(), strengths,
-                List.copyOf(matched), List.copyOf(missing), suggestions, resume.updatedAt(), LocalDateTime.now());
+                List.copyOf(matched), List.copyOf(missing), suggestions, List.of(), learningPlan,
+                resume.updatedAt(), LocalDateTime.now());
+        if (!persist) return draft;
+
         DiagnosisReportEntity entity = new DiagnosisReportEntity();
         entity.setResumeId(resume.id());
         entity.setJobId(jobId);
@@ -97,7 +169,8 @@ public class DiagnosisService {
         DiagnosisReport report = new DiagnosisReport(entity.getId(), draft.resumeId(), draft.jobId(), draft.targetRole(),
                 draft.overallScore(), draft.resumeQualityScore(), draft.jobMatchScore(), draft.jobMatchLevel(),
                 draft.level(), draft.summary(), draft.dimensions(), draft.jobMatchBreakdown(), draft.strengths(),
-                draft.matchedKeywords(), draft.missingKeywords(), draft.suggestions(), draft.resumeUpdatedAt(), draft.createdAt());
+                draft.matchedKeywords(), draft.missingKeywords(), draft.suggestions(), draft.agentTrace(), draft.learningPlan(),
+                draft.resumeUpdatedAt(), draft.createdAt());
         entity.setReportJson(jsonCodec.write(report));
         repository.save(entity);
         return report;

@@ -23,6 +23,8 @@
 | 技能图谱 | Java 后端、前端、AI/大模型方向节点、依赖关系和岗位需求热度 |
 | 单智能体 | 自主编排 `resume.profile -> job.match -> interview.start -> resume.diagnose -> learning.generate` 工具链 |
 | MCP | 内置 `/mcp` JSON-RPC 服务端，同时提供可配置的远程 MCP 招聘工具客户端 |
+| 面试题库 | 从 4 个公开 GitHub 仓库抽取 1,508 道面试题，写入独立 Qdrant 集合，面试 Agent 按会话上下文实时检索真实题目与参考要点 |
+| 岗位推荐 Agent | 读简历后自主规划检索、必要时换说法重试，再用加权算法精排岗位，输出推荐清单与技能缺口；分数全部可追溯 |
 
 ## 技术架构
 
@@ -45,8 +47,9 @@ Spring Boot REST API
         MCP JSON-RPC source (可选)
 
 业务数据：PostgreSQL
-向量检索：Qdrant
-本地向量生成：TF-IDF + TruncatedSVD 256 维
+岗位向量：Qdrant -> careernav_jobs（4,110 条）
+面试题向量：Qdrant -> careernav_interview_questions（1,508 条）
+本地向量生成：TF-IDF + TruncatedSVD 256 维（岗位 5001 / 面试题 5002）
 ```
 
 详细设计见 [docs/architecture.md](docs/architecture.md)。
@@ -150,11 +153,84 @@ java -jar target\career-navigation-platform-1.0.0.jar `
 ```text
 read_session_context
 get_job_requirements
-search_question_bank
+search_question_bank          # 内置小型模板，兜底
+search_interview_questions_qdrant   # 面试题向量库，优先
 evaluate_candidate_answer
 save_interview_memory
 get_interview_progress
 ```
+## 岗位推荐 Agent（简历诊断）
+
+填完简历后，Agent 会自己在岗位库里找匹配岗位。设计原则是**大模型负责理解与表达，算法负责打分**：
+所有匹配分来自已有的加权算法（技能/方向/经验/学历/城市/证据六维），模型只在两个节点介入——
+把简历翻译成检索语句，以及判断召回质量够不够、要不要换说法重搜。
+
+```text
+extract_profile -> recall -> rank -> reflect --(重试最多 2 次)--> gap_analysis -> compose
+   LLM 出画像       语义召回    算法精排     LLM 决定是否重搜         技能缺口        LLM 写结论 + 防幻觉校验
+```
+
+调用方式：
+
+```text
+POST /api/diagnoses/agent?resumeId=1&city=长沙&limit=6
+```
+
+返回 `recommendations`（岗位 + 分数 + 维度明细）、`skillGaps`（技能缺口）、`trace`（决策轨迹）。
+实现位于 `interview-agent/app/job_graph.py` 与 `job_tools.py`，详见
+[interview-agent/README.md](interview-agent/README.md)。
+
+## 面试题向量库（GitHub 公开题库）
+
+岗位向量库只覆盖“招什么”，面试 Agent 还需要“问什么”。因此项目额外构建了独立的面试题向量库，
+数据来自 4 个许可证明确的公开 GitHub 仓库，只用纯文本（Markdown / JSON），不镜像图片。
+
+| 来源仓库 | 许可证 | 入库题目 |
+| --- | --- | --- |
+| `Snailclimb/JavaGuide` | Apache-2.0 | 1,041 |
+| `yangshun/tech-interview-handbook` | MIT | 278 |
+| `codeprepdev/codeprep-questions` | CC-BY-4.0 | 108 |
+| `doocs/advanced-java` | CC-BY-SA-4.0 | 81 |
+
+合计 1,508 条，覆盖 Java 后端、计算机基础、算法、系统设计、行为面试等阶段；每条记录都保留
+`sourceUrl` 和 `license`，可随时回溯原作者。
+
+```text
+Qdrant collection : careernav_interview_questions
+向量维度          : 256（Cosine）
+Embedding         : 本地 TF-IDF + TruncatedSVD，服务端口 5002
+数据文件          : D:\何处是家乡\data\github-interview-datasets\interview_questions.jsonl
+```
+
+重建流程（三步）：
+
+```powershell
+# 1. 镜像 4 个仓库的纯文本文件（走 jsDelivr，跳过图片）
+python .\ops\interview\fetch_github_interview_sources.py
+
+# 2. 解析成统一 JSONL
+python .\ops\interview\build_interview_questions.py
+
+# 3. 训练/复用嵌入模型并写入 Qdrant（--refit 重新训练，--recreate 重建集合）
+python .\ops\interview\index_interview_qdrant.py --refit --recreate
+```
+
+启动查询侧嵌入服务（重建模型后必须重启，或依赖服务内置的模型热重载）：
+
+```powershell
+Start-Process python -ArgumentList "D:\何处是家乡\new pj\ops\interview\embedding_server_interview.py" -WindowStyle Hidden
+```
+
+检索自检：
+
+```powershell
+python .\ops\interview\query_interview_qdrant.py "Redis 缓存穿透怎么解决"
+```
+
+Agent 侧通过 `search_interview_questions_qdrant` 工具调用它：LLM 先判断是否需要题库，
+Qdrant 按岗位技能与候选人回答召回 Top-K，再由 LLM 结合简历改写成追问。需要具体技术细节时走向量库，
+只需要通用开场时退回内置模板，向量库不可用时不阻塞整个面试流程。
+
 ## 配置大模型
 
 不配置密钥时使用“LangChain4j 本地推理 + 工具链”，不依赖外网即可运行。接入 OpenAI 兼容接口：

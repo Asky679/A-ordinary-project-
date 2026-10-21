@@ -1,6 +1,8 @@
 import json
+import os
 from typing import Any
 
+import requests
 from langchain_core.tools import tool
 
 CONTEXTS: dict[str, dict[str, Any]] = {}
@@ -212,10 +214,121 @@ def get_interview_progress(session_id: str) -> str:
     }, ensure_ascii=False)
 
 
+# --------------------------------------------------------------------------- #
+# Qdrant-backed interview question retrieval
+# --------------------------------------------------------------------------- #
+INTERVIEW_QDRANT_URL = os.getenv("INTERVIEW_QDRANT_URL", "http://127.0.0.1:6333")
+INTERVIEW_COLLECTION = os.getenv("INTERVIEW_COLLECTION", "careernav_interview_questions")
+INTERVIEW_EMBEDDING_URL = os.getenv("INTERVIEW_EMBEDDING_URL", "http://127.0.0.1:5002/v1/embeddings")
+KB_STAGES = {"self_intro", "backend", "system", "behavior", "algorithm", "reverse", "offer", "process", "ai"}
+
+
+def _kb_embed(text: str) -> list:
+    response = requests.post(INTERVIEW_EMBEDDING_URL, json={"input": text}, timeout=20)
+    response.raise_for_status()
+    return response.json()["data"][0]["embedding"]
+
+
+def _kb_query(session_id: str, query: str) -> str:
+    """Build the retrieval query.
+
+    An explicit query (typically the candidate's last answer or the topic the
+    interviewer wants to probe) is used as-is, because padding it with the job
+    title dilutes the vector. Only when nothing is supplied do we synthesise a
+    query from the job and resume context.
+    """
+    query = (query or "").strip()
+    if query:
+        return query
+    context = get_context(session_id)
+    job = context.get("job") or {}
+    resume = context.get("resume") or {}
+    parts = [
+        str(job.get("title") or ""),
+        " ".join(_job_skills(session_id)),
+        str(resume.get("targetRole") or ""),
+    ]
+    return " ".join(part for part in parts if part).strip() or "计算机岗位面试"
+
+
+@tool
+def search_interview_questions_qdrant(session_id: str, query: str = "", stage: str = "", limit: int = 4) -> str:
+    """从本地面试题向量库（Qdrant）检索真实面试题与参考答案，返回来源和许可证。
+
+    与 search_question_bank 的小型内置模板不同，本工具检索的是已入库的公开题库向量，
+    适合需要具体技术细节、原理或权威参考要点时使用。
+    """
+    text = _kb_query(session_id, query)
+    size = max(1, min(int(limit or 4), 10))
+    # Only filter by stage when the caller is explicit, or when there is no
+    # topic at all (opening question). A wrong stage filter is worse than none.
+    selected_stage = (stage or "").strip()
+    if not selected_stage and not (query or "").strip():
+        selected_stage = (_select_stage(session_id) or "").strip()
+    try:
+        vector = _kb_embed(text)
+    except Exception as exc:  # noqa: BLE001 - planner falls back to the static bank
+        return json.dumps(
+            {"source": "qdrant", "available": False, "stage": "embedding-unavailable",
+             "error": str(exc), "items": []}, ensure_ascii=False)
+
+    def run(stage_value: str):
+        body = {"vector": vector, "limit": size, "with_payload": True}
+        if stage_value in KB_STAGES:
+            body["filter"] = {"must": [{"key": "stage", "match": {"value": stage_value}}]}
+        response = requests.post(
+            INTERVIEW_QDRANT_URL + "/collections/" + INTERVIEW_COLLECTION + "/points/search",
+            json=body,
+            timeout=25,
+        )
+        response.raise_for_status()
+        return response.json().get("result", [])
+
+    try:
+        hits = run(selected_stage)
+        top = float(hits[0].get("score", 0.0)) if hits else 0.0
+        if selected_stage and top < 0.35:
+            # The stage filter is starving the result set: retry unfiltered.
+            unfiltered = run("")
+            if unfiltered and float(unfiltered[0].get("score", 0.0)) > top:
+                hits = unfiltered
+                selected_stage = ""
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps(
+            {"source": "qdrant", "available": False, "error": str(exc), "items": []},
+            ensure_ascii=False,
+        )
+    items = []
+    for hit in hits:
+        payload = hit.get("payload") or {}
+        items.append({
+            "score": round(float(hit.get("score", 0.0)), 3),
+            "question": payload.get("question"),
+            "referenceAnswer": (payload.get("answer") or "")[:600],
+            "stage": payload.get("stage"),
+            "role": payload.get("role"),
+            "skills": payload.get("skills"),
+            "kind": payload.get("kind"),
+            "source": payload.get("source"),
+            "sourceUrl": payload.get("sourceUrl"),
+            "license": payload.get("license"),
+        })
+    return json.dumps({
+        "source": "qdrant:" + INTERVIEW_COLLECTION,
+        "available": True,
+        "query": text,
+        "stageFilter": selected_stage,
+        "count": len(items),
+        "attribution": "题目原文来自公开 GitHub 仓库（MIT / Apache-2.0 / CC-BY-4.0 / CC-BY-SA-4.0），使用时请保留来源与许可证。",
+        "items": items,
+    }, ensure_ascii=False)
+
+
 AGENT_TOOLS = [
     read_session_context,
     get_job_requirements,
     search_question_bank,
+    search_interview_questions_qdrant,
     evaluate_candidate_answer,
     save_interview_memory,
     get_interview_progress,

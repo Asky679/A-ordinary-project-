@@ -1,0 +1,12 @@
+INFO:     127.0.0.1:53569 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59472 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59472 - "POST /v1/diagnosis/analyze HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59337 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61560 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63009 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63009 - "POST /v1/diagnosis/analyze HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55557 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59093 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52449 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63746 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58274 - "GET /health HTTP/1.1" 200 OK

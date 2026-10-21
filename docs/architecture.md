@@ -113,6 +113,44 @@ tfidf-svd-256
 
 Spring Boot 通过 Qdrant REST API 创建 collection、批量写入 points、执行向量检索和返回 Qdrant 状态。
 
+## 5.1 面试题向量库
+
+岗位向量解决“招什么”，面试题向量解决“问什么”，两者分属不同集合、不同嵌入空间，互不干扰。
+
+```text
+careernav_jobs                    4,110 条   岗位检索（Java LangChain4j / JobVectorSearchService）
+careernav_interview_questions     1,508 条   题库检索（Python LangGraph search_interview_questions_qdrant）
+```
+
+数据链路：
+
+```text
+4 个公开 GitHub 仓库（MIT / Apache-2.0 / CC-BY-4.0 / CC-BY-SA-4.0）
+  -> 只镜像 .md/.json 文本（约 6.7 MB，跳过图片）
+  -> 按来源解析为统一 JSONL（题干 / 答案 / 阶段 / 技能 / 来源 / 许可证）
+  -> 本地 TF-IDF + TruncatedSVD 256 维（端口 5002）
+  -> upsert 到 Qdrant，payload 建索引：source / stage / role / kind / lang / difficulty / skills
+```
+
+检索时的自主编排：
+
+```text
+LLM 判断是否需要外部题库
+  -> 组织查询（候选人回答 / 岗位技能）
+  -> 5002 生成查询向量
+  -> Qdrant Top-K（stage 过滤，Top-1 分数低于 0.35 时自动放宽过滤）
+  -> 返回题干 + 参考要点 + sourceUrl + license
+  -> LLM 结合简历改写成追问，并写入面试记忆
+```
+
+设计取舍：
+
+- **独立集合**：岗位与题库的向量语义完全不同，混在一起会互相污染召回结果。
+- **独立嵌入模型**：题库模型在题库语料上重新拟合，短查询（如“缓存雪崩”）命中率显著优于复用岗位模型。
+- **模型热重载**：重建索引会改写模型文件，嵌入服务按 mtime 自动重载，避免查询向量与库中向量属于不同向量空间。
+- **降级不阻塞**：Qdrant 或嵌入服务不可用时工具返回 `available:false`，Agent 退回内置模板，面试流程继续。
+- **署名可追溯**：每条记录携带 `sourceUrl` 与 `license`，检索结果向使用者展示来源。
+
 ## 6. 扩展建议
 
 - 使用对象存储保存 PDF/Word 简历并增加文档解析

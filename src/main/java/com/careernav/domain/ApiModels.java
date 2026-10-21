@@ -25,6 +25,63 @@ public final class ApiModels {
                                 @Valid List<ExperienceItem> experiences,
                                 String selfEvaluation, String rawText) {}
 
+    /** 创建简历版本：label 为版本类型，targetJobId 可选（用于绑定当时的岗位与匹配分）。 */
+    /** ---------- Agent 岗位匹配 ---------- */
+    public record AgentMatchRequest(Long resumeId, java.util.List<Long> jobIds) {}
+
+    public record MatchBreakdown(String requirement, String importance, String status, String evidence) {}
+
+    public record AgentMatchItem(Long jobId, int ruleScore, int agentScore, int finalScore,
+                                 String verdict, String reason, java.util.List<MatchBreakdown> breakdown) {}
+
+    public record AgentMatchResponse(boolean available, java.util.List<AgentMatchItem> items) {}
+
+    /** ---------- ATS 检查 ---------- */
+    public record AtsIssue(String level, String category, String issue, String action) {}
+
+    public record AtsBreakdown(int parseability, int structure, int keywords, int content) {}
+
+    public record AtsReport(int atsScore, String level, AtsBreakdown breakdown,
+                            List<AtsIssue> issues, java.util.Map<String, Object> parsed) {}
+
+    /** ---------- 引导式简历编写 ---------- */
+    public record SkillStat(String skill, int count, int percent) {}
+
+    public record DirectionProfile(String role, int jobCount, List<SkillStat> topSkills) {}
+
+    public record SkillEvidence(String skill, boolean evidenced, String location) {}
+
+    public record QualityScore(int total, int completeness, int coverage, int evidence, int quantified,
+                               List<String> suggestions) {}
+
+    public record GuidanceQuestion(String key, String label, String hint, String example) {}
+
+    public record GuidanceReport(Long resumeId, String role, DirectionProfile profile,
+                                 List<String> matchedSkills, List<String> missingSkills,
+                                 List<SkillEvidence> evidences, QualityScore quality,
+                                 List<GuidanceQuestion> questions) {}
+
+    public record ProjectDraftRequest(String role, String background, String responsibility,
+                                      String techStack, String challenge, String result, boolean useAi) {}
+
+    public record ProjectDraft(String description, String highlight, String mode, List<String> facts) {}
+
+    public record ResumeVersionRequest(String label, Long targetJobId, String note) {}
+
+    /** 版本详情：快照反序列化为结构化简历，便于前端直接展示与对比。 */
+    public record ResumeVersionView(Long id, Long resumeId, Integer versionNo, String label,
+                                    Long targetJobId, String targetJobTitle, Integer matchScore,
+                                    String note, List<String> factLocks, LocalDateTime createdAt,
+                                    ResumePayload snapshot) {}
+
+    /** 事实锁设置：fields 为字段 key 列表，空列表表示全部解锁。 */
+    public record FactLockRequest(List<String> fields) {}
+
+    public record ResumeFieldDiff(String field, String label, String left, String right) {}
+
+    public record ResumeVersionCompare(ResumeVersionView left, ResumeVersionView right,
+                                       List<ResumeFieldDiff> diffs) {}
+
     public record ResumeView(Long id, String ownerName, String targetRole, String city, String phone,
                              String email, String education, String school, String major,
                              Integer graduationYear, List<String> skills, List<ProjectItem> projects,
@@ -36,7 +93,8 @@ public final class ApiModels {
                           List<String> responsibilities, String description, String jobDescription,
                           String jobRequirements, String contentOrigin, String aiModel, String aiConfidence, String source,
                           String sourceUrl, LocalDateTime collectedAt, LocalDateTime publishedAt,
-                          LocalDateTime validThrough, LocalDateTime lastSeenAt, String status) {}
+                          LocalDateTime validThrough, LocalDateTime lastSeenAt, String status,
+                          String category, String industry, String companySize, String location) {}
 
     public record MatchScoreComponent(String key, String label, double weight, double factor,
                                       int contribution, String detail) {}
@@ -74,6 +132,8 @@ public final class ApiModels {
                                   List<String> strengths,
                                   List<String> matchedKeywords, List<String> missingKeywords,
                                   List<DiagnosisSuggestion> suggestions,
+                                  List<String> agentTrace,
+                                  LearningPath learningPlan,
                                   LocalDateTime resumeUpdatedAt, LocalDateTime createdAt) {}
 
     public record LearningPathRequest(@NotNull(message = "请选择简历") Long resumeId,

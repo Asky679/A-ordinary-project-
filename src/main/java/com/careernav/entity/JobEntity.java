@@ -34,6 +34,10 @@ public class JobEntity {
     @Column(length = 30)
     private String status;
     @Column(length = 80)
+    private String category;
+    private String industry;
+    private String companySize;
+    private String location;
     private String contentHash;
 
     public Long getId() { return id; } public void setId(Long id) { this.id = id; }
@@ -61,4 +65,8 @@ public class JobEntity {
     public LocalDateTime getLastSeenAt() { return lastSeenAt; } public void setLastSeenAt(LocalDateTime v) { lastSeenAt = v; }
     public String getStatus() { return status; } public void setStatus(String v) { status = v; }
     public String getContentHash() { return contentHash; } public void setContentHash(String v) { contentHash = v; }
+    public String getCategory() { return category; } public void setCategory(String v) { category = v; }
+    public String getIndustry() { return industry; } public void setIndustry(String v) { industry = v; }
+    public String getCompanySize() { return companySize; } public void setCompanySize(String v) { companySize = v; }
+    public String getLocation() { return location; } public void setLocation(String v) { location = v; }
 }

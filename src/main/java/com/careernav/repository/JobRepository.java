@@ -29,6 +29,18 @@ public interface JobRepository extends JpaRepository<JobEntity, Long> {
     @Query(value = """
             SELECT * FROM jobs
             WHERE status = 'ACTIVE'
+              AND id <> :id
+              AND (:category = '' OR category = :category)
+              AND (:city = '' OR city = :city)
+            ORDER BY dataset_year DESC NULLS LAST, id DESC
+            LIMIT :limit
+            """, nativeQuery = true)
+    List<JobEntity> findSimilar(@Param("id") Long id, @Param("category") String category,
+                                @Param("city") String city, @Param("limit") int limit);
+
+    @Query(value = """
+            SELECT * FROM jobs
+            WHERE status = 'ACTIVE'
               AND (:city = '' OR city ILIKE CONCAT('%', :city, '%'))
             ORDER BY dataset_year DESC NULLS LAST, id DESC
             LIMIT 5000

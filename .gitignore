@@ -12,9 +12,9 @@ tools/qdrant/storage/
 tools/qdrant/*.exe
 tools/qdrant/*.zip
 tools/qdrant/.qdrant-initialized
-ops/__pycache__/
 *.env
 application.local.yml
 interview-agent/.venv/
-interview-agent/__pycache__/
 interview-agent/.env
+__pycache__/
+*.pyc

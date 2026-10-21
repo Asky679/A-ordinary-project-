@@ -20,7 +20,6 @@
         <button class="nav-item" data-view="jobs"><span class="nav-icon">⌕</span><span>岗位雷达</span></button>
         <button class="nav-item" data-view="interview"><span class="nav-icon">◉</span><span>模拟面试</span></button>
         <button class="nav-item" data-view="diagnosis"><span class="nav-icon">✓</span><span>简历诊断</span></button>
-        <button class="nav-item" data-view="learning"><span class="nav-icon">↗</span><span>学习路线</span></button>
       </nav>
       <div class="sidebar-agent">
         <div class="agent-orbit"><span></span><b>AI</b></div>
@@ -112,7 +111,7 @@
                 <section class="view" id="view-resume">
           <div class="page-heading resume-page-heading">
             <div><span class="eyebrow">RESUME WORKBENCH</span><h1>简历工坊</h1><p>参考 300 份真实简历模板，按结构化内容生成可投递的单页简历。</p></div>
-            <div class="heading-actions"><button class="ghost-button" id="new-resume">＋ 新建简历</button><button class="primary-button" id="save-resume">保存简历</button></div>
+            <div class="heading-actions"><button class="ghost-button" id="new-resume">＋ 新建简历</button><button class="ghost-button" id="open-ats">ATS 体检</button><button class="ghost-button" id="open-guidance">引导式编写</button><button class="ghost-button" id="save-version">保存版本</button><button class="primary-button" id="save-resume">保存简历</button></div>
           </div>
           <div class="resume-workbench">
             <form class="resume-editor-panel" id="resume-form">
@@ -206,6 +205,33 @@
               <div class="preview-footer"><span>内容将自动适配 A4 单页比例</span><span>模板灵感来自 <a href="https://hicv.cn" target="_blank" rel="noreferrer">HICV 300 份简历模板</a></span></div>
             </aside>
           </div>
+
+          <article class="panel resume-versions-panel">
+            <div class="panel-head">
+              <div><span class="eyebrow">VERSION CONTROL</span><h3>简历版本与事实锁</h3>
+                <p class="version-sub">每次保存为一个快照，可绑定目标岗位与当时的匹配分，随时恢复。</p></div>
+              <div class="version-actions">
+                <select id="version-label">
+                  <option value="母版">母版</option>
+                  <option value="草稿">草稿</option>
+                  <option value="JD定制版">JD 定制版</option>
+                  <option value="英文版">英文版</option>
+                  <option value="归档版">归档版</option>
+                </select>
+              </div>
+            </div>
+            <div class="fact-locks" id="fact-locks">
+              <span class="fact-lock-title">事实锁</span>
+              <label><input type="checkbox" value="ownerName"> 姓名</label>
+              <label><input type="checkbox" value="phone"> 手机号</label>
+              <label><input type="checkbox" value="email"> 邮箱</label>
+              <label><input type="checkbox" value="school"> 学校</label>
+              <label><input type="checkbox" value="education"> 学历</label>
+              <label><input type="checkbox" value="major"> 专业</label>
+              <span class="fact-lock-hint">锁定后保存简历时不能修改这些事实，避免 AI 改写篡改</span>
+            </div>
+            <div id="resume-versions" class="version-list"><div class="empty-mini">保存后会在这里生成版本快照</div></div>
+          </article>
         </section>
 
         <section class="view" id="view-jobs">
@@ -216,28 +242,29 @@
           <div class="filter-bar panel">
             <label class="search-field"><span>⌕</span><input id="job-keyword" placeholder="搜索岗位、公司或技能"></label>
             <select id="job-city-filter"><option value="">全部城市</option><option>杭州</option><option>上海</option><option>北京</option><option>深圳</option><option>成都</option><option>南京</option></select>
+            <select id="job-category-filter"><option value="">全部方向</option></select>
+            <select id="job-experience-filter"><option value="">经验不限</option><option>经验不限</option><option>1-3年</option><option>3-5年</option><option>5-10年</option><option>10年以上</option></select>
+            <select id="job-education-filter"><option value="">学历不限</option><option>大专</option><option>本科</option><option>硕士</option><option>博士</option></select>
+            <select id="job-salary-filter"><option value="0">薪资不限</option><option value="10">10K 以上</option><option value="15">15K 以上</option><option value="20">20K 以上</option><option value="30">30K 以上</option></select>
             <select id="job-sort"><option value="match">按匹配度</option><option value="latest">按发布时间</option></select>
             <span class="result-count" id="job-count">0 个机会</span>
           </div>
-          <details class="match-weight-panel panel" id="match-weight-panel" open>
+          <details class="match-policy-panel panel" id="match-policy-panel" open>
             <summary>
-              <div><span class="eyebrow">MATCH POLICY</span><h3>匹配权重与城市偏好</h3><p>拖动权重后，系统会按新的占比重新计算匹配分。</p></div>
-              <span class="match-weight-summary" id="match-weight-summary">默认：技能 39% · 方向 22%</span>
+              <div><span class="eyebrow">AGENT MATCH POLICY</span><h3>Agent 匹配策略与城市偏好</h3><p>Agent 会读取每个岗位的职责与任职要求，逐条对照简历后动态给分，不再使用手动权重。</p></div>
+              <span class="match-policy-summary" id="match-policy-summary">Agent 精排 · 规则兜底</span>
             </summary>
-            <div class="match-weight-grid">
-              <label class="match-weight-item"><span>技能匹配 <b data-weight-value="skills">35</b></span><input type="range" min="0" max="50" step="1" value="35" data-match-weight="skills"><small>岗位技能标签覆盖度，技能优先</small></label>
-              <label class="match-weight-item"><span>岗位方向 <b data-weight-value="role">20</b></span><input type="range" min="0" max="50" step="1" value="20" data-match-weight="role"><small>后端、前端、数据、AI、运维等岗位族匹配</small></label>
-              <label class="match-weight-item"><span>工作经验 <b data-weight-value="experience">15</b></span><input type="range" min="0" max="50" step="1" value="15" data-match-weight="experience"><small>实习、工作年限与岗位级别是否匹配</small></label>
-              <label class="match-weight-item"><span>学历背景 <b data-weight-value="education">10</b></span><input type="range" min="0" max="50" step="1" value="10" data-match-weight="education"><small>学历是否达到岗位门槛</small></label>
-              <label class="match-weight-item"><span>城市偏好 <b data-weight-value="city">5</b></span><input type="range" min="0" max="50" step="1" value="5" data-match-weight="city"><small>设为 0 后，城市不参与匹配加分或扣分</small></label>
-              <label class="match-weight-item"><span>项目证据 <b data-weight-value="evidence">5</b></span><input type="range" min="0" max="50" step="1" value="5" data-match-weight="evidence"><small>项目、实习以及量化成果对技能的佐证程度</small></label>
+            <div class="agent-policy-explain">
+              <div><b>① 硬过滤</b><span>先排除你明确不接受的工作城市</span></div>
+              <div><b>② 规则召回</b><span>用规则分选出最相关的前 20 个岗位，控制耗时与调用成本</span></div>
+              <div><b>③ Agent 精排</b><span>按岗位自身要求判断满足、部分满足、不满足，并给出证据</span></div>
             </div>
+            <div class="agent-score-note" id="agent-match-note">匹配度由 Agent 读取岗位职责和任职要求动态计算；Agent 不可用时自动使用规则分。</div>
             <div class="city-policy">
-              <div class="city-policy-head"><div><strong>不接受的工作城市</strong><small>加入后无论城市权重多高，都不会出现在岗位结果中</small></div><span id="excluded-city-count">0 个</span></div>
+              <div class="city-policy-head"><div><strong>不接受的工作城市</strong><small>加入后会作为硬性条件直接过滤，不会出现在 Agent 候选与岗位结果中。</small></div><span id="excluded-city-count">0 个</span></div>
               <div class="excluded-city-chips" id="excluded-city-chips"></div>
               <div class="city-entry"><input id="excluded-city-input" placeholder="例如：成都、石家庄"><button type="button" class="ghost-button" id="add-excluded-city">＋ 添加城市</button></div>
             </div>
-            <div class="match-weight-actions"><span id="match-weight-hint">当前权重会自动归一化到 100 分</span><div><button type="button" class="ghost-button" id="reset-match-weights">恢复默认</button><button type="button" class="primary-button" id="apply-match-weights">重新匹配</button></div></div>
           </details>
           <div id="job-list" class="job-list"><div class="loading-card"><i></i>正在读取 MCP 岗位流...</div></div>
         </section>
@@ -276,30 +303,20 @@
         <section class="view" id="view-diagnosis">
           <div class="page-heading">
             <div><span class="eyebrow">AGENT RESUME DIAGNOSIS</span><h1>简历诊断</h1><p>分别计算简历质量与岗位匹配，并解释综合分来源，再由 Agent 生成技能缺口与优先级修改建议。</p></div>
-            <div class="diagnosis-actions"><select id="diagnosis-resume"></select><select id="diagnosis-job"></select><button class="primary-button" id="run-diagnosis">启动 Agent 诊断</button></div>
+            <div class="diagnosis-actions"><select id="diagnosis-resume"></select><select id="diagnosis-job"></select><button class="primary-button" id="run-diagnosis">启动 Agent 诊断</button><button class="ghost-button" id="run-job-agent">AI 岗位推荐</button></div>
           </div>
           <div id="diagnosis-content" class="diagnosis-empty panel">
             <div class="scan-illustration"><span></span><i>简历</i><b>AI</b></div><h3>等待诊断任务</h3><p>选择目标岗位，智能体会输出评分、关键词缺口和按优先级排序的修改建议。</p>
           </div>
+          <div id="job-agent-content" class="panel job-agent-panel">
+            <div class="job-agent-empty">
+              <div><span class="eyebrow">JOB RECOMMENDATION AGENT</span><h3>AI 岗位推荐</h3></div>
+              <p>Agent 会先读你的简历、自己规划检索语句，觉得召回质量不够时会换说法重搜，再用加权算法精排岗位。匹配分全部来自算法，可逐项追溯。</p>
+              <p class="job-agent-hint">点击右上角「AI 岗位推荐」开始，单次约 5-10 秒。</p>
+            </div>
+          </div>
         </section>
 
-        <section class="view" id="view-learning">
-          <div class="page-heading">
-            <div><span class="eyebrow">LEARNING NAVIGATOR</span><h1>学习路线</h1><p>根据技能图谱与岗位需求，把缺口拆成可交付、可验证的阶段计划。</p></div>
-            <div class="learning-controls"><input id="learning-role" value="Java 后端开发工程师"><button class="primary-button" id="generate-path">生成路线</button></div>
-          </div>
-          <div class="learning-grid">
-            <article class="panel path-panel">
-              <div class="panel-head"><div><span class="eyebrow">PERSONAL PATH</span><h3>阶段路线</h3></div><div class="readiness"><span>岗位准备度</span><strong id="readiness-score">--%</strong></div></div>
-              <div id="learning-summary" class="learning-summary">选择简历并生成学习路线后，这里会显示你的技能差距与阶段目标。</div>
-              <div id="learning-modules" class="learning-modules"></div>
-            </article>
-            <article class="panel graph-panel">
-              <div class="panel-head"><div><span class="eyebrow">SKILL GRAPH</span><h3>岗位技能图谱</h3></div><span class="legend"><i class="owned"></i>已掌握 <i></i>待提升</span></div>
-              <div id="skill-graph" class="skill-graph"></div>
-            </article>
-          </div>
-        </section>
       </div>
     </main>
   </div>
@@ -308,6 +325,20 @@
     <div class="modal">
       <button class="modal-close" data-close-modal>×</button>
       <div id="job-modal-content"></div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="guidance-modal" aria-hidden="true">
+    <div class="modal guidance-modal">
+      <button class="modal-close" data-close-guidance>×</button>
+      <div id="guidance-body"></div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="ats-modal" aria-hidden="true">
+    <div class="modal ats-modal">
+      <button class="modal-close" data-close-ats>×</button>
+      <div id="ats-body"></div>
     </div>
   </div>
 

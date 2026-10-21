@@ -26,10 +26,18 @@ public class JobService {
 
     private final JobRepository repository;
     private final JsonCodec jsonCodec;
+    private final LangGraphMatchClient matchClient;
 
-    public JobService(JobRepository repository, JsonCodec jsonCodec) {
+    public JobService(JobRepository repository, JsonCodec jsonCodec, LangGraphMatchClient matchClient) {
         this.repository = repository;
         this.jsonCodec = jsonCodec;
+        this.matchClient = matchClient;
+    }
+
+    /** 岗位列表的结构化筛选条件（空值表示不限）。 */
+    public record JobFilter(String category, String experience, String education,
+                            Integer salaryMin, String industry) {
+        public static JobFilter empty() { return new JobFilter("", "", "", null, ""); }
     }
 
     public record MatchWeights(int skills, int role, int experience, int education, int city, int evidence) {
@@ -99,20 +107,103 @@ public class JobService {
     @Transactional(readOnly = true)
     public List<JobRecommendation> recommend(ResumeView resume, String city, int limit,
                                               MatchWeights requestedWeights, Collection<String> excludedCities) {
+        return recommend(resume, city, limit, requestedWeights, excludedCities, JobFilter.empty());
+    }
+
+    public List<JobRecommendation> recommend(ResumeView resume, String city, int limit,
+                                              MatchWeights requestedWeights, Collection<String> excludedCities,
+                                              JobFilter filter) {
         MatchWeights weights = requestedWeights == null ? MatchWeights.defaults() : requestedWeights.sanitized();
         if (weights.total() <= 0) weights = MatchWeights.defaults();
         Set<String> owned = normalize(resume.skills());
         Set<String> excluded = normalizeCityFilters(excludedCities);
         String targetCity = city == null ? "" : city.trim();
+        JobFilter safeFilter = filter == null ? JobFilter.empty() : filter;
         MatchWeights finalWeights = weights;
         return repository.findRecommendationCandidates(targetCity).stream()
                 .filter(this::isVisible)
                 .filter(job -> targetCity.isBlank() || matchesCity(job.getCity(), targetCity))
                 .filter(job -> !isExcludedCity(job.getCity(), excluded))
+                .filter(job -> matchesFilter(job, safeFilter))
                 .map(job -> score(resume, job, owned, finalWeights))
                 .sorted(Comparator.comparingInt(JobRecommendation::matchScore).reversed())
                 .limit(Math.max(1, limit))
                 .toList();
+    }
+
+    private boolean matchesFilter(JobEntity job, JobFilter filter) {
+        if (!blank(filter.category()) && !filter.category().equals(job.getCategory())) return false;
+        if (!blank(filter.experience()) && !contains(job.getExperience(), filter.experience())) return false;
+        if (!blank(filter.education()) && !contains(job.getEducation(), filter.education())) return false;
+        if (!blank(filter.industry()) && !contains(job.getIndustry(), filter.industry())) return false;
+        if (filter.salaryMin() != null && filter.salaryMin() > 0) {
+            Integer low = salaryLowerBound(job.getSalary());
+            // 设了薪资下限时，"面议"等无法解析的岗位也排除，避免占位
+            if (low == null || low < filter.salaryMin()) return false;
+        }
+        return true;
+    }
+
+    /**
+     * 薪资是自由文本（"15-30K·15薪" / "面议"），取第一个数字作为下限。
+     * 无法解析时返回 null，表示不参与薪资过滤，避免把"面议"岗位误删。
+     */
+    private Integer salaryLowerBound(String salary) {
+        if (salary == null || salary.isBlank() || salary.contains("面议")) return null;
+        Matcher matcher = Pattern.compile("(\\d+(?:\\.\\d+)?)").matcher(salary);
+        if (!matcher.find()) return null;
+        double value;
+        try { value = Double.parseDouble(matcher.group(1)); } catch (NumberFormatException e) { return null; }
+        // 统一换算成「K/月」，否则日薪、时薪会被误判为月薪
+        if (salary.contains("元/天") || salary.contains("元/日")) return (int) Math.round(value * 22 / 1000.0);
+        if (salary.contains("元/时") || salary.contains("元/小时")) return (int) Math.round(value * 8 * 22 / 1000.0);
+        if (salary.contains("万/年")) return (int) Math.round(value * 10 / 12.0);
+        if (salary.contains("万/月")) return (int) Math.round(value * 10);
+        return (int) Math.round(value);
+    }
+
+    private boolean contains(String value, String needle) {
+        return value != null && value.toLowerCase().contains(needle.toLowerCase());
+    }
+
+    private boolean blank(String value) { return value == null || value.isBlank(); }
+
+    /**
+     * Agent 精排：对给定岗位按「岗位自身要求」打分，并与规则分融合。
+     * 最终分 = Agent 0.7 + 规则 0.3；Agent 不可用时返回 available=false。
+     */
+    @Transactional(readOnly = true)
+    public AgentMatchResponse agentRerank(ResumeView resume, List<Long> jobIds) {
+        if (jobIds == null || jobIds.isEmpty()) return new AgentMatchResponse(false, List.of());
+        List<JobView> jobs = jobIds.stream().distinct().limit(20).map(this::get).toList();
+        LangGraphMatchClient.RerankResult result = matchClient.rerank(resume, jobs);
+        if (result == null || !result.available()) return new AgentMatchResponse(false, List.of());
+
+        Map<Long, LangGraphMatchClient.AgentScore> byId = new HashMap<>();
+        for (LangGraphMatchClient.AgentScore item : result.items()) byId.put(item.jobId(), item);
+
+        List<AgentMatchItem> items = new ArrayList<>();
+        for (JobView job : jobs) {
+            LangGraphMatchClient.AgentScore agent = byId.get(job.id());
+            if (agent == null) continue;
+            int rule = evaluate(resume, job.id()).matchScore();
+            int fused = (int) Math.round(agent.score() * 0.7 + rule * 0.3);
+            List<MatchBreakdown> breakdown = agent.breakdown().stream()
+                    .map(row -> new MatchBreakdown(row.requirement(), row.importance(), row.status(), row.evidence()))
+                    .toList();
+            items.add(new AgentMatchItem(job.id(), rule, agent.score(), fused,
+                    agent.verdict(), agent.reason(), breakdown));
+        }
+        return new AgentMatchResponse(!items.isEmpty(), items);
+    }
+
+    @Transactional(readOnly = true)
+    public List<JobView> similar(Long jobId, int limit) {
+        JobEntity job = getEntity(jobId);
+        String category = job.getCategory() == null ? "" : job.getCategory();
+        String city = job.getCity() == null ? "" : job.getCity();
+        int size = Math.max(1, Math.min(limit, 20));
+        return repository.findSimilar(jobId, category, city, size).stream().map(this::toView).toList();
     }
     @Transactional(readOnly = true)
     public JobRecommendation evaluate(ResumeView resume, Long jobId) {
@@ -163,7 +254,8 @@ public class JobService {
                 entity.getContentOrigin(), entity.getAiModel(),
                 entity.getAiConfidence() == null ? null : entity.getAiConfidence().toPlainString(),
                 entity.getSource(), entity.getSourceUrl(), entity.getCollectedAt(), entity.getPublishedAt(),
-                entity.getValidThrough(), entity.getLastSeenAt(), entity.getStatus() == null ? "ACTIVE" : entity.getStatus()
+                entity.getValidThrough(), entity.getLastSeenAt(), entity.getStatus() == null ? "ACTIVE" : entity.getStatus(),
+                entity.getCategory(), entity.getIndustry(), entity.getCompanySize(), entity.getLocation()
         );
     }
 

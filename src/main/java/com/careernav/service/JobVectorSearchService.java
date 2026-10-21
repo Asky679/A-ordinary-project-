@@ -64,14 +64,12 @@ public class JobVectorSearchService {
         if (!q.isBlank() && embeddingClient.configured() && qdrant.collectionExists()) {
             float[] vector = embeddingClient.embed(q);
             if (vector != null) {
-                JsonNode result = qdrant.search(vector, buildFilter(yearFilter), Math.min(200, safeLimit * 4));
+                // status / city / dataset_year are pushed down into Qdrant, so the hits
+                // already satisfy every filter. That removes the old post-filtering and
+                // the 4x over-fetch it needed to compensate for dropped rows.
+                JsonNode result = qdrant.search(vector, buildFilter(cityFilter, yearFilter), safeLimit);
                 List<JobView> jobs = loadJobs(result);
-                List<JobView> filtered = jobs.stream()
-                        .filter(job -> cityFilter.isBlank() || (job.city() != null && job.city().contains(cityFilter)))
-                        .filter(job -> yearFilter == 0 || yearFilter == datasetYear(job.id()))
-                        .limit(safeLimit)
-                        .toList();
-                if (!filtered.isEmpty()) return filtered;
+                if (!jobs.isEmpty()) return jobs;
             }
         }
         return keywordSearch(q, cityFilter, yearFilter, safeLimit);
@@ -80,7 +78,9 @@ public class JobVectorSearchService {
     @Transactional
     public int reindex(int limit) {
         if (!embeddingClient.configured()) return 0;
-        int safeLimit = Math.max(1, Math.min(limit, 5000));
+        // 岗位总量已超过 9,000，上限从 5,000 放宽到 20,000，
+        // 否则一次重建只能覆盖前 5,000 条，后续导入的岗位进不了向量库。
+        int safeLimit = Math.max(1, Math.min(limit, 20000));
         int dimensions = properties.getEmbedding().getDimensions();
         qdrant.ensureCollection(dimensions);
         List<Map<String, Object>> rows = jdbc.queryForList("""
@@ -122,9 +122,15 @@ public class JobVectorSearchService {
         return updated;
     }
 
-    private Map<String, Object> buildFilter(int yearFilter) {
+    private Map<String, Object> buildFilter(String cityFilter, int yearFilter) {
         List<Map<String, Object>> must = new ArrayList<>();
         must.add(Map.of("key", "status", "match", Map.of("value", "ACTIVE")));
+        if (cityFilter != null && !cityFilter.isBlank()) {
+            // The city column is normalised (243 distinct values, no suffix or district
+            // text), and the UI passes a value taken from that same set, so an exact
+            // keyword match is both correct and cheaper than a contains() post-filter.
+            must.add(Map.of("key", "city", "match", Map.of("value", cityFilter.trim())));
+        }
         if (yearFilter > 0) must.add(Map.of("key", "dataset_year", "match", Map.of("value", yearFilter)));
         return Map.of("must", must);
     }
@@ -142,7 +148,8 @@ public class JobVectorSearchService {
                 SELECT id, external_id, title, company, city, salary, education, experience,
                        skills_json, responsibilities_json, description, job_description, job_requirements,
                        content_origin, ai_model, ai_confidence, source, source_url, collected_at,
-                       published_at, valid_through, last_seen_at, status
+                       published_at, valid_through, last_seen_at, status,
+                       category, industry, company_size, location
                 FROM jobs
                 WHERE id IN (%s)
                 """.formatted(placeholders);
@@ -162,11 +169,6 @@ public class JobVectorSearchService {
         }
         return jdbc.query(keywordSql(), this::mapJob, query, query, query,
                 city, city, year, year, query, query, query, limit);
-    }
-
-    private int datasetYear(Long id) {
-        Integer year = jdbc.queryForObject("SELECT dataset_year FROM jobs WHERE id = ?", Integer.class, id);
-        return year == null ? 0 : year;
     }
 
     private String searchText(Map<String, Object> row) {
@@ -229,7 +231,9 @@ public class JobVectorSearchService {
                 rs.getString("source"), rs.getString("source_url"),
                 date(rs.getTimestamp("collected_at")), date(rs.getTimestamp("published_at")),
                 date(rs.getTimestamp("valid_through")), date(rs.getTimestamp("last_seen_at")),
-                rs.getString("status")
+                rs.getString("status"),
+                rs.getString("category"), rs.getString("industry"),
+                rs.getString("company_size"), rs.getString("location")
         );
     }
 

@@ -15,6 +15,7 @@ from .tools import (
     evaluate_candidate_answer,
     read_session_context,
     save_interview_memory,
+    search_interview_questions_qdrant,
     search_question_bank,
     set_context,
 )
@@ -26,7 +27,8 @@ SYSTEM_PROMPT = """
 1. 自主决定需要调用哪些工具，例如：
    - read_session_context
    - get_job_requirements
-   - search_question_bank
+   - search_question_bank（内置小型模板，仅作兜底）
+   - search_interview_questions_qdrant（本地面试题向量库，优先使用）
    - evaluate_candidate_answer
    - save_interview_memory
    - get_interview_progress
@@ -178,8 +180,17 @@ class InterviewAgent:
     def _rule_start(self, session_id: str) -> dict[str, Any]:
         context = get_context(session_id)
         context_result = tool_result(read_session_context, {"session_id": session_id})
-        job_result = tool_result(search_question_bank, {"session_id": session_id, "keyword": "", "stage": ""})
-        questions = job_result.get("questions") or []
+        tool_calls = ["read_session_context", "search_interview_questions_qdrant", "save_interview_memory"]
+        kb_result = tool_result(search_interview_questions_qdrant, {
+            "session_id": session_id, "query": "", "stage": "self_intro", "limit": 3,
+        })
+        questions = [item.get("question") for item in (kb_result.get("items") or []) if item.get("question")]
+        stage = "self_intro"
+        if not questions:
+            tool_calls.insert(1, "search_question_bank")
+            job_result = tool_result(search_question_bank, {"session_id": session_id, "keyword": "", "stage": ""})
+            questions = job_result.get("questions") or []
+            stage = job_result.get("stage", "self_intro")
         question = questions[0] if questions else "请先介绍一下你自己，并重点说明一个和目标岗位最相关的项目。"
         tool_result(save_interview_memory, {
             "session_id": session_id,
@@ -189,12 +200,12 @@ class InterviewAgent:
             "question": question,
             "score": None,
             "feedback": "",
-            "stage": job_result.get("stage", "self_intro"),
+            "stage": stage,
             "done": False,
             "round": 1,
-            "toolCalls": ["read_session_context", "search_question_bank", "save_interview_memory"],
+            "toolCalls": tool_calls,
             "memory": context.get("memory", []),
-            "reasoningSummary": "本地规划器先读取上下文，再从问题库选择开场问题。",
+            "reasoningSummary": "本地规划器先读取上下文，再从面试题向量库选择开场问题。",
         }
 
     def _rule_answer(self, session_id: str, answer: str) -> dict[str, Any]:
@@ -210,11 +221,17 @@ class InterviewAgent:
         tool_calls = ["evaluate_candidate_answer", "get_interview_progress"]
         if not done:
             context["round"] = current_round + 1
+            kb_result = tool_result(search_interview_questions_qdrant, {
+                "session_id": session_id, "query": answer[:300], "limit": 4,
+            })
+            questions = [item.get("question") for item in (kb_result.get("items") or []) if item.get("question")]
+            tool_calls.append("search_interview_questions_qdrant")
             selection = tool_result(search_question_bank, {"session_id": session_id, "keyword": ""})
-            questions = selection.get("questions") or []
-            next_question = questions[(current_round) % len(questions)] if questions else "请结合项目说明你的技术取舍和量化结果。"
             stage = selection.get("stage", "followup")
-            tool_calls.append("search_question_bank")
+            if not questions:
+                questions = selection.get("questions") or []
+                tool_calls.append("search_question_bank")
+            next_question = questions[(current_round) % len(questions)] if questions else "请结合项目说明你的技术取舍和量化结果。"
         notes = evaluation.get("gaps") or []
         for note in notes[:2]:
             tool_result(save_interview_memory, {"session_id": session_id, "note": str(note)})

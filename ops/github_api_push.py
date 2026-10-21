@@ -85,7 +85,7 @@ def main():
         "tree": entries,
     })
     commit = api(session, "POST", f"/repos/{REPO}/git/commits", {
-        "message": "Add CareerNav career navigation platform",
+        "message": "Add agent-driven job matching and complete CareerNav features",
         "tree": tree["sha"],
         "parents": [parent_sha],
         "author": AUTHOR,

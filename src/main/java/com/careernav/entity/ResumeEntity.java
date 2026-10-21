@@ -22,6 +22,8 @@ public class ResumeEntity {
     @Column(columnDefinition = "text") private String experiencesJson;
     @Column(columnDefinition = "text") private String selfEvaluation;
     @Column(columnDefinition = "text") private String rawText;
+    /** 事实锁：被锁定字段的 key 列表（JSON 数组），修改时校验。 */
+    @Column(columnDefinition = "text") private String factLocksJson;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
@@ -40,6 +42,7 @@ public class ResumeEntity {
     public String getExperiencesJson() { return experiencesJson; } public void setExperiencesJson(String v) { experiencesJson = v; }
     public String getSelfEvaluation() { return selfEvaluation; } public void setSelfEvaluation(String v) { selfEvaluation = v; }
     public String getRawText() { return rawText; } public void setRawText(String v) { rawText = v; }
+    public String getFactLocksJson() { return factLocksJson; } public void setFactLocksJson(String v) { factLocksJson = v; }
     public LocalDateTime getCreatedAt() { return createdAt; } public void setCreatedAt(LocalDateTime v) { createdAt = v; }
     public LocalDateTime getUpdatedAt() { return updatedAt; } public void setUpdatedAt(LocalDateTime v) { updatedAt = v; }
 }
