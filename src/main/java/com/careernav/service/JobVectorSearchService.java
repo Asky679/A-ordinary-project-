@@ -191,7 +191,8 @@ public class JobVectorSearchService {
                 SELECT id, external_id, title, company, city, salary, education, experience,
                        skills_json, responsibilities_json, description, job_description, job_requirements,
                        content_origin, ai_model, ai_confidence, source, source_url,
-                       collected_at, published_at, valid_through, last_seen_at, status
+                       collected_at, published_at, valid_through, last_seen_at, status,
+                       category, industry, company_size, location
                 FROM jobs
                 WHERE status = 'ACTIVE'
                   AND (title ILIKE CONCAT('%', ?, '%')
@@ -210,7 +211,8 @@ public class JobVectorSearchService {
                 SELECT id, external_id, title, company, city, salary, education, experience,
                        skills_json, responsibilities_json, description, job_description, job_requirements,
                        content_origin, ai_model, ai_confidence, source, source_url,
-                       collected_at, published_at, valid_through, last_seen_at, status
+                       collected_at, published_at, valid_through, last_seen_at, status,
+                       category, industry, company_size, location
                 FROM jobs
                 WHERE status = 'ACTIVE'
                   AND (? = '' OR city ILIKE CONCAT('%', ?, '%'))

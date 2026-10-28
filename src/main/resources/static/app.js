@@ -189,7 +189,7 @@ function fillResumeForm(resume) {
   state.projects = (resume.projects || []).map(item => ({...item}));
   state.experiences = (resume.experiences || []).map(item => ({...item}));
   renderSkillPicker(); renderProjectEditor(); renderExperienceEditor(); updateResumePreview();
-  loadVersions(); loadFactLocks();
+  loadVersions(); loadFactLocks(); resetEducationVerification();
 }
 function emptyResume() {
   $('#resume-form').reset();
@@ -199,6 +199,7 @@ function emptyResume() {
   renderSkillPicker(); renderProjectEditor(); renderExperienceEditor(); updateResumePreview();
   const vbox = $('#resume-versions'); if (vbox) vbox.innerHTML = '<div class="empty-mini">保存后会在这里生成版本快照</div>';
   $$('#fact-locks input').forEach(box => { box.checked = false; });
+  resetEducationVerification();
   $('#owner-name').focus();
 }
 function renderSkillPicker() {
@@ -393,6 +394,94 @@ async function saveResume() {
     toast('保存成功', '简历已更新，岗位匹配与诊断将使用最新内容');
     return saved;
   } catch (error) { toast('保存失败', error.message, true); return null; }
+}
+/* ---------- 学历材料核验 ---------- */
+function resetEducationVerification() {
+  const badge = $('#education-verify-status');
+  if (badge) { badge.className = 'edu-verify-badge'; badge.textContent = '未核验'; }
+  const result = $('#education-proof-result');
+  if (result) result.innerHTML = '';
+  const button = $('#upload-education-proof');
+  if (button) button.disabled = false;
+}
+function setEducationVerificationStatus(label, mode='') {
+  const badge = $('#education-verify-status');
+  if (!badge) return;
+  badge.className = `edu-verify-badge ${mode}`.trim();
+  badge.textContent = label;
+}
+async function extractEducationImageText(file) {
+  if (!window.Tesseract) {
+    throw new Error('图片 OCR 组件加载失败，请检查网络，或直接上传可复制文字的 PDF 报告');
+  }
+  setEducationVerificationStatus('正在识别图片', 'loading');
+  const result = await Tesseract.recognize(file, 'chi_sim+eng', {
+    logger: message => {
+      if (message.status === 'recognizing text') {
+        setEducationVerificationStatus(`图片识别 ${Math.round((message.progress || 0) * 100)}%`, 'loading');
+      }
+    }
+  });
+  return (result?.data?.text || '').trim();
+}
+async function runEducationVerification(file) {
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) { toast('文件过大', '学历证明材料不能超过 5MB', true); return; }
+  const button = $('#upload-education-proof');
+  const resultBox = $('#education-proof-result');
+  try {
+    if (button) button.disabled = true;
+    const saved = await saveResume();
+    if (!saved) return;
+    if (button) button.disabled = true;
+    const isImage = /\.(png|jpe?g|webp)$/i.test(file.name);
+    let ocrText = '';
+    setEducationVerificationStatus('正在准备材料', 'loading');
+    if (resultBox) resultBox.innerHTML = '<div class="edu-verify-loading"><i></i><span>Agent 正在解析学历材料并逐项比对简历...</span></div>';
+    if (isImage) ocrText = await extractEducationImageText(file);
+    const form = new FormData();
+    form.append('file', file);
+    if (ocrText) form.append('ocrText', ocrText);
+    const response = await fetch(`/api/resumes/${saved.id}/education-verification`, { method: 'POST', body: form });
+    let payload;
+    try { payload = await response.json(); } catch { throw new Error(`服务返回异常 (${response.status})`); }
+    if (!response.ok || payload.success === false) throw new Error(payload.message || `核验失败 (${response.status})`);
+    renderEducationVerification(payload.data);
+  } catch (error) {
+    setEducationVerificationStatus('核验失败', 'unknown');
+    if (resultBox) resultBox.innerHTML = `<div class="edu-verify-error"><strong>未能完成核验</strong><p>${escapeHtml(error.message)}</p></div>`;
+    toast('学历核验失败', error.message, true);
+  } finally {
+    if (button) button.disabled = false;
+    const input = $('#education-proof-file'); if (input) input.value = '';
+  }
+}
+function renderEducationVerification(report) {
+  const mode = report.status === 'CONSISTENT' ? 'consistent'
+    : report.status === 'MISMATCH' ? 'mismatch'
+    : report.status === 'NEEDS_REVIEW' ? 'review' : 'unknown';
+  setEducationVerificationStatus(report.statusLabel, mode);
+  const checks = (report.checks || []).map(item => {
+    const cls = item.status === 'MATCH' ? 'ok' : item.status === 'MISMATCH' ? 'bad' : 'unknown';
+    const label = item.status === 'MATCH' ? '一致' : item.status === 'MISMATCH' ? '不一致' : '无法判断';
+    return `<div class="edu-check-row ${cls}">
+      <div class="edu-check-name">${escapeHtml(item.label)}<small>${label}</small></div>
+      <div class="edu-check-values"><span><b>简历</b>${escapeHtml(item.resumeValue || '未填写')}</span><span><b>材料</b>${escapeHtml(item.proofValue || '未识别')}</span></div>
+      <p>${escapeHtml(item.detail || '')}</p>
+    </div>`;
+  }).join('');
+  const warnings = (report.warnings || []).map(item => `<li>${escapeHtml(item)}</li>`).join('');
+  const resultBox = $('#education-proof-result');
+  if (!resultBox) return;
+  resultBox.innerHTML = `<div class="edu-result-head ${mode}">
+      <div class="edu-result-score"><strong>${report.score}</strong><span>一致性</span></div>
+      <div class="edu-result-main"><div class="edu-result-title"><h4>${escapeHtml(report.statusLabel)}</h4><span>置信度 ${report.confidence}%</span></div>
+        <p>${escapeHtml(report.summary)}</p>
+        <div class="edu-result-meta"><span>${escapeHtml(report.reportType || '学历材料')}</span><span>${report.officialReportDetected ? '检测到学信网标识' : '未检测到官方报告标识'}</span><span>${report.extractionMode === 'LLM_ASSISTED' ? 'Agent 辅助抽取' : '规则抽取'}</span><span>凭证 ${escapeHtml(report.proofHash)}</span></div>
+      </div>
+    </div>
+    <div class="edu-check-grid">${checks}</div>
+    <details class="edu-warning-list"><summary>核验边界与注意事项</summary><ul>${warnings}</ul></details>`;
 }
 /* ---------- ATS 体检 ---------- */
 function openAts() {
@@ -1135,6 +1224,11 @@ $('#fact-locks').addEventListener('change', saveFactLocks);
 $('#resume-form').addEventListener('submit', event => { event.preventDefault(); saveResume(); });
 $('#resume-form').addEventListener('input', updateResumePreview);
 $('#resume-form').addEventListener('change', updateResumePreview);
+$('#upload-education-proof').addEventListener('click', () => $('#education-proof-file').click());
+$('#education-proof-file').addEventListener('change', event => {
+  const file = event.target.files?.[0];
+  if (file) runEducationVerification(file);
+});
 window.addEventListener('resize', () => requestAnimationFrame(fitResumePreview));$('#refresh-btn').addEventListener('click', async () => { try { await refreshDashboard(); renderJobs(); toast('数据已刷新','总览数据已同步'); } catch (error) { toast('刷新失败',error.message,true); } });
 $('#refresh-jobs').addEventListener('click', refreshJobs);
 $('#job-keyword').addEventListener('input', renderJobs);

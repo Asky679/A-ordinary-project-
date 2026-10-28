@@ -24,9 +24,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 JAR = ROOT / "target" / "career-navigation-platform-1.0.0.jar"
 AGENT_ENV = ROOT / "interview-agent" / ".env"
-LOG = ROOT / "target" / "app-8080.log"
-ERR_LOG = ROOT / "target" / "app-8080.err.log"
-
 DEFAULTS = {
     "DB_URL": "jdbc:postgresql://127.0.0.1:5432/careernav",
     "DB_USERNAME": "careernav",
@@ -65,6 +62,9 @@ def main() -> int:
 
     env = dict(os.environ)
     env.update(DEFAULTS)
+    port = env.get("SERVER_PORT", "8080")
+    log = ROOT / "target" / f"app-{port}.log"
+    err_log = ROOT / "target" / f"app-{port}.err.log"
     agent = load_agent_env()
     for key in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL"):
         if agent.get(key):
@@ -73,14 +73,14 @@ def main() -> int:
     if not env.get("OPENAI_API_KEY"):
         print("note: no OPENAI_API_KEY found in interview-agent/.env -> running without LLM")
 
-    LOG.parent.mkdir(parents=True, exist_ok=True)
+    log.parent.mkdir(parents=True, exist_ok=True)
     flags = 0
     if os.name == "nt":
         # NOTE: DETACHED_PROCESS must not be used here. The Oracle `java.exe`
         # shim needs a console and exits silently (no output at all) when it is
         # fully detached. CREATE_NO_WINDOW keeps the window hidden but working.
         flags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
-    with LOG.open("ab") as out, ERR_LOG.open("ab") as err:
+    with log.open("ab") as out, err_log.open("ab") as err:
         process = subprocess.Popen(
             ["java", "-jar", str(JAR)],
             cwd=str(ROOT),
@@ -91,15 +91,15 @@ def main() -> int:
             creationflags=flags,
         )
     print("started Spring Boot: pid " + str(process.pid))
-    print("logs: " + str(LOG) + " | " + str(ERR_LOG))
+    print("logs: " + str(log) + " | " + str(err_log))
     deadline = time.time() + 90
     import urllib.error
     import urllib.request
     while time.time() < deadline:
         try:
-            with urllib.request.urlopen("http://127.0.0.1:8080/", timeout=3) as response:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=3) as response:
                 if response.status == 200:
-                    print("ready: http://localhost:8080")
+                    print(f"ready: http://localhost:{port}")
                     return 0
         except Exception:  # noqa: BLE001 - still booting
             time.sleep(2)

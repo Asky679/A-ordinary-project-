@@ -36,6 +36,17 @@ public final class ApiModels {
 
     public record AgentMatchResponse(boolean available, java.util.List<AgentMatchItem> items) {}
 
+    /** ---------- 学历材料一致性核验 ---------- */
+    public record EducationVerificationCheck(String key, String label, String resumeValue,
+                                             String proofValue, String status, String detail) {}
+
+    public record EducationVerificationResult(Long resumeId, String status, String statusLabel,
+                                               int score, int confidence, String reportType,
+                                               boolean officialReportDetected, String proofFileType,
+                                               String proofHash, String extractionMode, String summary,
+                                               List<EducationVerificationCheck> checks,
+                                               List<String> warnings, LocalDateTime checkedAt) {}
+
     /** ---------- ATS 检查 ---------- */
     public record AtsIssue(String level, String category, String issue, String action) {}
 

@@ -140,6 +140,27 @@
                   <label><span>学校</span><input id="school" placeholder="学校名称"></label>
                   <label><span>专业</span><input id="major" placeholder="计算机科学与技术"></label>
                 </div>
+                <div class="education-verification-card" id="education-verification">
+                  <div class="edu-verify-head">
+                    <div class="edu-verify-title">
+                      <span class="edu-verify-icon">✓</span>
+                      <div><h4>学历材料核验</h4><p>先自行登录学信网下载官方报告，再上传材料让 Agent 比对简历。</p></div>
+                    </div>
+                    <span class="edu-verify-badge" id="education-verify-status">未核验</span>
+                  </div>
+                  <div class="edu-verify-steps">
+                    <span><i>1</i>打开学信网</span>
+                    <span><i>2</i>本人登录并下载报告</span>
+                    <span><i>3</i>上传 PDF / 图片</span>
+                  </div>
+                  <div class="edu-verify-actions">
+                    <a class="ghost-button" href="https://www.chsi.com.cn/xlcx/bgcx.jsp" target="_blank" rel="noopener noreferrer">打开学信网 ↗</a>
+                    <button type="button" class="primary-button" id="upload-education-proof">上传学历证明材料</button>
+                    <input type="file" id="education-proof-file" accept=".pdf,.png,.jpg,.jpeg,.webp" hidden>
+                  </div>
+                  <div class="edu-verify-privacy">Agent 只解析你主动上传的材料，不登录学信网、不保存登录会话；原始文件仅在本次核验中处理。如报告带有在线验证码，请前往 <a href="https://www.chsi.com.cn/xlcx/yzzw.jsp" target="_blank" rel="noopener noreferrer">学信网官方验真入口</a> 手动核验。</div>
+                  <div id="education-proof-result" class="edu-verify-result" aria-live="polite"></div>
+                </div>
               </section>
 
               <section class="editor-section">
@@ -352,6 +373,7 @@
   </div>
 
   <div class="toast-stack" id="toast-stack"></div>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>
