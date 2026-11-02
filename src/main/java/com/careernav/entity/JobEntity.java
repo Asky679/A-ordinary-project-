@@ -38,6 +38,8 @@ public class JobEntity {
     private String industry;
     private String companySize;
     private String location;
+    @Column(columnDefinition = "text")
+    private String searchText;
     private String contentHash;
 
     public Long getId() { return id; } public void setId(Long id) { this.id = id; }
@@ -69,4 +71,5 @@ public class JobEntity {
     public String getIndustry() { return industry; } public void setIndustry(String v) { industry = v; }
     public String getCompanySize() { return companySize; } public void setCompanySize(String v) { companySize = v; }
     public String getLocation() { return location; } public void setLocation(String v) { location = v; }
+    public String getSearchText() { return searchText; } public void setSearchText(String v) { searchText = v; }
 }

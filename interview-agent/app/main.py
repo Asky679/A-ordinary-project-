@@ -93,6 +93,6 @@ def analyze_diagnosis(request: DiagnosisAgentRequest) -> dict[str, Any]:
 
 @app.post("/v1/match/rerank")
 def rerank_jobs(request: MatchRequest) -> dict[str, Any]:
-    """岗位匹配 Agent：按每个岗位自身的任职要求打分，返回分项与理由。"""
+    """岗位匹配 Agent：返回岗位受限权重和逐条证据，最终分由 Java 规则引擎计算。"""
     return match_agent.rerank(request.resume, request.jobs)
 

@@ -17,6 +17,7 @@
       <nav class="nav-list" aria-label="主导航">
         <button class="nav-item active" data-view="dashboard"><span class="nav-icon">⌂</span><span>成长总览</span></button>
         <button class="nav-item" data-view="resume"><span class="nav-icon">▤</span><span>简历工坊</span></button>
+        <button class="nav-item" data-view="library"><span class="nav-icon">▦</span><span>简历仓库</span></button>
         <button class="nav-item" data-view="jobs"><span class="nav-icon">⌕</span><span>岗位雷达</span></button>
         <button class="nav-item" data-view="interview"><span class="nav-icon">◉</span><span>模拟面试</span></button>
         <button class="nav-item" data-view="diagnosis"><span class="nav-icon">✓</span><span>简历诊断</span></button>
@@ -111,7 +112,7 @@
                 <section class="view" id="view-resume">
           <div class="page-heading resume-page-heading">
             <div><span class="eyebrow">RESUME WORKBENCH</span><h1>简历工坊</h1><p>参考 300 份真实简历模板，按结构化内容生成可投递的单页简历。</p></div>
-            <div class="heading-actions"><button class="ghost-button" id="new-resume">＋ 新建简历</button><button class="ghost-button" id="open-ats">ATS 体检</button><button class="ghost-button" id="open-guidance">引导式编写</button><button class="ghost-button" id="save-version">保存版本</button><button class="primary-button" id="save-resume">保存简历</button></div>
+            <div class="heading-actions"><button class="ghost-button" id="new-resume">＋ 新建简历</button><button class="ghost-button" id="open-ats">ATS 体检</button><button class="ghost-button" id="open-guidance">引导式编写</button><button class="ghost-button" id="save-version">保存版本</button><button class="ghost-button" id="export-resume-pdf">导出 PDF</button><button class="primary-button" id="save-resume">保存到仓库</button></div>
           </div>
           <div class="resume-workbench">
             <form class="resume-editor-panel" id="resume-form">
@@ -190,6 +191,10 @@
                   <div class="selected-skill-head"><span>已选技能 <b id="skill-count">0</b> 项</span><small>点击标签可移除，继续选择不会重复</small></div>
                   <div class="selected-skills" id="selected-skills"></div>
                   <div class="custom-skill-row"><input id="custom-skill-input" placeholder="补充技能，例如 Unity、Flutter、Kubernetes"><button type="button" class="ghost-button" id="add-custom-skill">＋ 添加自定义技能</button></div>
+                  <div class="skill-verify-strip" id="java-skill-verify" hidden>
+                    <div><span class="eyebrow">JAVA SKILL CHECK</span><strong>Java 水平验证</strong><p>10 道分级题 · 15 分钟 · 题库来源 GitHub MIT 仓库</p></div>
+                    <div class="skill-verify-side"><span class="skill-proficiency-badge" id="java-proficiency-badge">未验证</span><button type="button" class="primary-button" id="verify-java-skill">开始验证</button></div>
+                  </div>
                 </div>
               </section>
 
@@ -255,6 +260,26 @@
           </article>
         </section>
 
+        <section class="view" id="view-library">
+          <div class="page-heading">
+            <div><span class="eyebrow">RESUME REPOSITORY</span><h1>简历仓库</h1><p>集中保存每一次编辑结果，随时继续修改、创建版本或导出 PDF。</p></div>
+            <div class="heading-actions"><button class="ghost-button" id="library-new-resume">＋ 新建简历</button><button class="ghost-button" id="library-refresh">↻ 刷新仓库</button></div>
+          </div>
+          <div class="library-stats">
+            <article class="library-stat panel"><span class="eyebrow">SAVED RESUMES</span><strong id="library-count">0</strong><small>已保存简历</small></article>
+            <article class="library-stat panel"><span class="eyebrow">WITH PROJECTS</span><strong id="library-project-count">0</strong><small>含项目经历</small></article>
+            <article class="library-stat panel"><span class="eyebrow">LAST UPDATED</span><strong id="library-last-updated" class="library-date">--</strong><small>最近一次编辑</small></article>
+          </div>
+          <div class="library-toolbar panel">
+            <label class="search-field"><span>⌕</span><input id="library-search" placeholder="搜索姓名、目标岗位、城市或技能"></label>
+            <select id="library-sort"><option value="updated">最近更新</option><option value="name">按姓名</option><option value="complete">按完成度</option></select>
+            <span class="result-count" id="library-result-count">0 份简历</span>
+          </div>
+          <div id="resume-library-grid" class="resume-library-grid">
+            <div class="library-empty panel"><span class="eyebrow">EMPTY REPOSITORY</span><h3>还没有保存的简历</h3><p>从简历工坊新建并保存后，这里会出现可编辑、可导出的简历卡片。</p><button type="button" class="primary-button" data-library-action="new">去创建第一份简历</button></div>
+          </div>
+        </section>
+
         <section class="view" id="view-jobs">
           <div class="page-heading">
             <div><span class="eyebrow">JOB RADAR · MCP FEED</span><h1>岗位雷达</h1><p>实时汇聚岗位薪资与技术需求，按你的简历计算匹配优先级。</p></div>
@@ -262,7 +287,7 @@
           </div>
           <div class="filter-bar panel">
             <label class="search-field"><span>⌕</span><input id="job-keyword" placeholder="搜索岗位、公司或技能"></label>
-            <select id="job-city-filter"><option value="">全部城市</option><option>杭州</option><option>上海</option><option>北京</option><option>深圳</option><option>成都</option><option>南京</option></select>
+            <select id="job-city-filter"><option value="">全部城市</option></select>
             <select id="job-category-filter"><option value="">全部方向</option></select>
             <select id="job-experience-filter"><option value="">经验不限</option><option>经验不限</option><option>1-3年</option><option>3-5年</option><option>5-10年</option><option>10年以上</option></select>
             <select id="job-education-filter"><option value="">学历不限</option><option>大专</option><option>本科</option><option>硕士</option><option>博士</option></select>
@@ -270,17 +295,29 @@
             <select id="job-sort"><option value="match">按匹配度</option><option value="latest">按发布时间</option></select>
             <span class="result-count" id="job-count">0 个机会</span>
           </div>
+          <div class="city-mode-banner panel" id="city-mode-banner" hidden>
+            <div><span class="eyebrow">CITY JOB LIBRARY</span><h3 id="city-mode-title">城市岗位库</h3><p id="city-mode-subtitle">展示当前城市的全部有效岗位，支持分页加载。</p></div>
+            <div class="city-mode-total"><strong id="city-mode-total">0</strong><span>个岗位</span></div>
+          </div>
           <details class="match-policy-panel panel" id="match-policy-panel" open>
             <summary>
-              <div><span class="eyebrow">AGENT MATCH POLICY</span><h3>Agent 匹配策略与城市偏好</h3><p>Agent 会读取每个岗位的职责与任职要求，逐条对照简历后动态给分，不再使用手动权重。</p></div>
-              <span class="match-policy-summary" id="match-policy-summary">Agent 精排 · 规则兜底</span>
+              <div><span class="eyebrow">AHP + AGENT MATCH POLICY</span><h3>AHP 基准权重与 Agent 受限调权</h3><p>AHP 负责形成六维基准权重，Agent 根据岗位职责与任职要求在允许范围内调整，最终分由确定性规则引擎计算。</p></div>
+              <span class="match-policy-summary" id="match-policy-summary">AHP 基线 · Agent 调权 · 规则计算</span>
             </summary>
-            <div class="agent-policy-explain">
-              <div><b>① 硬过滤</b><span>先排除你明确不接受的工作城市</span></div>
-              <div><b>② 规则召回</b><span>用规则分选出最相关的前 20 个岗位，控制耗时与调用成本</span></div>
-              <div><b>③ Agent 精排</b><span>按岗位自身要求判断满足、部分满足、不满足，并给出证据</span></div>
+            <div class="ahp-weight-panel">
+              <div class="ahp-weight-head">
+                <div><span class="eyebrow">AHP BASELINE</span><strong>专家判断矩阵校验结果</strong></div>
+                <span class="ahp-consistency" id="ahp-consistency">正在读取一致性比率…</span>
+              </div>
+              <div class="ahp-weight-chips" id="ahp-weight-chips"><span class="ahp-weight-chip unavailable">正在读取 AHP 基准权重</span></div>
             </div>
-            <div class="agent-score-note" id="agent-match-note">匹配度由 Agent 读取岗位职责和任职要求动态计算；Agent 不可用时自动使用规则分。</div>
+            <div class="agent-policy-explain">
+              <div><b>① AHP 基线</b><span>用两两比较矩阵和特征向量生成六维默认权重</span></div>
+              <div><b>② 硬过滤</b><span>先排除你明确不接受的工作城市</span></div>
+              <div><b>③ Agent 调权</b><span>按岗位要求生成受限权重与逐条证据，不允许直接给总分</span></div>
+              <div><b>④ 规则计算</b><span>使用确定性因子和硬性上限计算最终岗位适配度</span></div>
+            </div>
+            <div class="agent-score-note" id="agent-match-note">匹配度以 AHP 基准权重为起点，由 Agent 受限调权后交给规则引擎计算；Agent 不可用时自动回退 AHP 基线。</div>
             <div class="city-policy">
               <div class="city-policy-head"><div><strong>不接受的工作城市</strong><small>加入后会作为硬性条件直接过滤，不会出现在 Agent 候选与岗位结果中。</small></div><span id="excluded-city-count">0 个</span></div>
               <div class="excluded-city-chips" id="excluded-city-chips"></div>
@@ -360,6 +397,13 @@
     <div class="modal ats-modal">
       <button class="modal-close" data-close-ats>×</button>
       <div id="ats-body"></div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="skill-test-modal" aria-hidden="true">
+    <div class="modal skill-test-modal">
+      <button class="modal-close" data-close-skill-test>×</button>
+      <div id="skill-test-body"></div>
     </div>
   </div>
 

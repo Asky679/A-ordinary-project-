@@ -1,5 +1,6 @@
 package com.careernav.service;
 
+import com.careernav.domain.ApiModels.AgentMatchWeights;
 import com.careernav.domain.ApiModels.JobView;
 import com.careernav.domain.ApiModels.ResumeView;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -20,7 +21,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** 调用 Python 侧岗位匹配 Agent（按岗位自身要求打分）。 */
+/** 调用 Python 侧岗位匹配 Agent，获取受限权重与逐条证据，不接收 LLM 直接分数。 */
 @Component
 public class LangGraphMatchClient {
     private static final Logger log = LoggerFactory.getLogger(LangGraphMatchClient.class);
@@ -73,8 +74,7 @@ public class LangGraphMatchClient {
                         row.path("evidence").asText(""))));
                 items.add(new AgentScore(
                         node.path("jobId").asLong(0),
-                        node.path("score").asInt(0),
-                        node.path("verdict").asText(""),
+                        readWeights(node.path("weights")),
                         node.path("reason").asText(""),
                         breakdown));
             });
@@ -90,7 +90,10 @@ public class LangGraphMatchClient {
         context.put("targetRole", resume.targetRole());
         context.put("city", resume.city());
         context.put("education", resume.education());
+        context.put("educationVerified", resume.educationVerified());
+        context.put("educationVerificationStatus", resume.educationVerificationStatus());
         context.put("skills", resume.skills());
+        context.put("skillProficiencies", resume.skillProficiencies());
         context.put("projects", resume.projects());
         context.put("experiences", resume.experiences());
         context.put("selfEvaluation", resume.selfEvaluation());
@@ -118,22 +121,36 @@ public class LangGraphMatchClient {
         return context;
     }
 
+    private AgentMatchWeights readWeights(JsonNode node) {
+        if (node == null || !node.isObject()) return null;
+        List<String> keys = List.of("skills", "role", "experience", "education", "city", "evidence");
+        if (keys.stream().anyMatch(key -> !node.has(key))) return null;
+        AgentMatchWeights weights = new AgentMatchWeights(
+                node.path("skills").asInt(0), node.path("role").asInt(0),
+                node.path("experience").asInt(0), node.path("education").asInt(0),
+                node.path("city").asInt(0), node.path("evidence").asInt(0));
+        int total = weights.skills() + weights.role() + weights.experience()
+                + weights.education() + weights.city() + weights.evidence();
+        return total > 0 ? weights : null;
+    }
+
     private String clip(String value, int max) {
         return value.length() <= max ? value : value.substring(0, max);
     }
 
     public record Breakdown(String requirement, String importance, String status, String evidence) {}
 
-    public record AgentScore(Long jobId, int score, String verdict, String reason, List<Breakdown> breakdown) {}
+    public record AgentScore(Long jobId, AgentMatchWeights weights, String reason, List<Breakdown> breakdown) {}
 
     public record RerankResult(boolean available, List<AgentScore> items) {}
 
     public Map<String, Object> status() {
         Map<String, Object> status = new LinkedHashMap<>();
         status.put("enabled", enabled);
-        status.put("mode", enabled ? "LANGGRAPH_LLM" : "DISABLED");
+        status.put("mode", enabled ? "LANGGRAPH_WEIGHTED_RULE" : "DISABLED");
         status.put("maxJobsPerCall", 20);
-        status.put("fusedScore", "agent 70% + rule 30%");
+        status.put("scoreMode", "agent bounded weights + deterministic rule scoring");
+        status.put("llmDirectScore", false);
         return status;
     }
 }

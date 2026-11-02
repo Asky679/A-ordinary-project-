@@ -33,7 +33,10 @@ SYSTEM_PROMPT = """你是 CareerNav 的简历诊断 Agent。你不是固定模�
 
 工作方式：
 1. 先调用 read_resume 了解候选人。
-2. 必须调用 get_rule_diagnosis 拿到规则分——**这些分数是系统算出来的，你不能修改、不能编造**。
+2. 必须调用 get_rule_diagnosis 拿到诊断分——**这些分数是系统算出来的，你不能修改、不能编造**。
+   - jobMatchScore 是推荐页与诊断页统一的「岗位适配度」，优先来自 Agent 逐条判断；
+   - ruleMatchScore 只是规则基线，不是最终岗位适配度；
+   - overallScore 是「综合竞争力」= 岗位适配度 × 60% + 简历质量 × 40%，不要把它说成岗位匹配概率。
 3. 根据规则诊断里的失分项和缺失关键词，自主决定还要调用哪些工具：
    - search_similar_jobs：看看市场上同类岗位还要求什么
    - search_interview_questions：检索题库，看这些缺口在面试里会怎么被问
@@ -122,6 +125,8 @@ def get_rule_diagnosis(resume_id: int, job_id: int = 0) -> str:
             "targetRole": data.get("targetRole"), "overallScore": data.get("overallScore"),
             "resumeQualityScore": data.get("resumeQualityScore"),
             "jobMatchScore": data.get("jobMatchScore"), "jobMatchLevel": data.get("jobMatchLevel"),
+            "jobMatchSource": data.get("jobMatchSource"), "ruleMatchScore": data.get("ruleMatchScore"),
+            "agentMatchScore": data.get("agentMatchScore"), "agentMatchBreakdown": data.get("agentMatchBreakdown") or [],
             "level": data.get("level"), "summary": data.get("summary"),
             "dimensions": data.get("dimensions") or [],
             "matchedKeywords": data.get("matchedKeywords") or [],

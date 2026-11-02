@@ -46,4 +46,11 @@ public interface JobRepository extends JpaRepository<JobEntity, Long> {
             LIMIT 5000
             """, nativeQuery = true)
     List<JobEntity> findRecommendationCandidates(@Param("city") String city);
+
+    @Query(value = """
+            SELECT city, COUNT(*) FROM jobs
+            WHERE status = 'ACTIVE' AND city IS NOT NULL AND BTRIM(city) <> ''
+            GROUP BY city
+            """, nativeQuery = true)
+    List<Object[]> countActiveByCity();
 }

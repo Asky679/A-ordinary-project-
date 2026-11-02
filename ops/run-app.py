@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """Launch the Spring Boot application with the local infrastructure settings.
 
 The app needs about a dozen environment variables (PostgreSQL, Qdrant, the two
@@ -9,7 +9,7 @@ shell is error prone, so this launcher:
   (that file is git-ignored, so no key ever lands in the repository),
 * fills in the local service addresses,
 * starts the packaged jar as a detached background process,
-* writes stdout/stderr to `target/app-8080.log` / `target/app-8080.err.log`.
+* writes stdout/stderr to `target/app-{port}.log` / `target/app-{port}.err.log`.
 
 It never prints or writes the API key.
 """
@@ -24,6 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 JAR = ROOT / "target" / "career-navigation-platform-1.0.0.jar"
 AGENT_ENV = ROOT / "interview-agent" / ".env"
+
 DEFAULTS = {
     "DB_URL": "jdbc:postgresql://127.0.0.1:5432/careernav",
     "DB_USERNAME": "careernav",

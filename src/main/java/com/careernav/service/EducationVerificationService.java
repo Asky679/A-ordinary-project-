@@ -3,11 +3,14 @@ package com.careernav.service;
 import com.careernav.common.BusinessException;
 import com.careernav.domain.ApiModels.EducationVerificationCheck;
 import com.careernav.domain.ApiModels.EducationVerificationResult;
+import com.careernav.entity.EducationVerificationEntity;
 import com.careernav.entity.ResumeEntity;
+import com.careernav.repository.EducationVerificationRepository;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -48,12 +51,19 @@ public class EducationVerificationService {
 
     private final ResumeService resumeService;
     private final AgentModelClient agentModelClient;
+    private final EducationVerificationRepository verificationRepository;
+    private final JsonCodec jsonCodec;
 
-    public EducationVerificationService(ResumeService resumeService, AgentModelClient agentModelClient) {
+    public EducationVerificationService(ResumeService resumeService, AgentModelClient agentModelClient,
+                                        EducationVerificationRepository verificationRepository,
+                                        JsonCodec jsonCodec) {
         this.resumeService = resumeService;
         this.agentModelClient = agentModelClient;
+        this.verificationRepository = verificationRepository;
+        this.jsonCodec = jsonCodec;
     }
 
+    @Transactional
     public EducationVerificationResult verify(Long resumeId, MultipartFile file, String clientOcrText) {
         ResumeEntity resume = resumeService.getEntity(resumeId);
         byte[] bytes = validateAndRead(file);
@@ -88,6 +98,7 @@ public class EducationVerificationService {
         boolean officialReportDetected = officialReportDetected(text);
         String reportType = reportType(text, merged.reportType());
         Comparison comparison = compare(resume, merged, officialReportDetected);
+        boolean passed = "CONSISTENT".equals(comparison.status()) && officialReportDetected;
 
         List<String> warnings = new ArrayList<>();
         warnings.add("本功能仅检查上传材料与简历字段的一致性，不连接或代替学信网官方验证。");
@@ -101,12 +112,16 @@ public class EducationVerificationService {
         if (agent == null) {
             warnings.add("本次使用规则抽取与比对；大模型不可用或未返回可解析结果。");
         }
+        if (!passed) {
+            warnings.add("本次学历材料未通过真实性核验，岗位匹配将把该学历视为不合格学历。");
+        }
 
         int confidence = confidence(comparison, officialReportDetected, agent != null, clientOcrUsed);
-        return new EducationVerificationResult(
+        EducationVerificationResult result = new EducationVerificationResult(
                 resumeId,
                 comparison.status(),
                 statusLabel(comparison.status()),
+                passed,
                 comparison.score(),
                 confidence,
                 reportType,
@@ -118,6 +133,48 @@ public class EducationVerificationService {
                 comparison.checks(),
                 List.copyOf(warnings),
                 LocalDateTime.now()
+        );
+        persist(result);
+        return result;
+    }
+
+    @Transactional(readOnly = true)
+    public EducationVerificationResult latest(Long resumeId) {
+        resumeService.get(resumeId);
+        return verificationRepository.findByResumeId(resumeId).map(this::toResult).orElse(null);
+    }
+
+    private void persist(EducationVerificationResult result) {
+        EducationVerificationEntity entity = verificationRepository.findByResumeId(result.resumeId())
+                .orElseGet(EducationVerificationEntity::new);
+        entity.setResumeId(result.resumeId());
+        entity.setStatus(result.status());
+        entity.setStatusLabel(result.statusLabel());
+        entity.setPassed(result.passed());
+        entity.setScore(result.score());
+        entity.setConfidence(result.confidence());
+        entity.setOfficialReportDetected(result.officialReportDetected());
+        entity.setReportType(result.reportType());
+        entity.setProofFileType(result.proofFileType());
+        entity.setProofHash(result.proofHash());
+        entity.setExtractionMode(result.extractionMode());
+        entity.setSummary(result.summary());
+        entity.setChecksJson(jsonCodec.write(result.checks()));
+        entity.setWarningsJson(jsonCodec.write(result.warnings()));
+        entity.setCheckedAt(result.checkedAt());
+        verificationRepository.save(entity);
+    }
+
+    private EducationVerificationResult toResult(EducationVerificationEntity entity) {
+        return new EducationVerificationResult(
+                entity.getResumeId(), entity.getStatus(), entity.getStatusLabel(),
+                Boolean.TRUE.equals(entity.getPassed()),
+                entity.getScore() == null ? 0 : entity.getScore(),
+                entity.getConfidence() == null ? 0 : entity.getConfidence(),
+                entity.getReportType(), Boolean.TRUE.equals(entity.getOfficialReportDetected()),
+                entity.getProofFileType(), entity.getProofHash(), entity.getExtractionMode(),
+                entity.getSummary(), jsonCodec.readList(entity.getChecksJson(), EducationVerificationCheck.class),
+                jsonCodec.readList(entity.getWarningsJson(), String.class), entity.getCheckedAt()
         );
     }
 

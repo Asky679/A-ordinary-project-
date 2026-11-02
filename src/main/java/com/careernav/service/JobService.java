@@ -27,11 +27,17 @@ public class JobService {
     private final JobRepository repository;
     private final JsonCodec jsonCodec;
     private final LangGraphMatchClient matchClient;
+    private final AgentMatchCacheService matchCache;
+    private final AhpWeightService ahpWeightService;
 
-    public JobService(JobRepository repository, JsonCodec jsonCodec, LangGraphMatchClient matchClient) {
+    public JobService(JobRepository repository, JsonCodec jsonCodec,
+                      LangGraphMatchClient matchClient, AgentMatchCacheService matchCache,
+                      AhpWeightService ahpWeightService) {
         this.repository = repository;
         this.jsonCodec = jsonCodec;
         this.matchClient = matchClient;
+        this.matchCache = matchCache;
+        this.ahpWeightService = ahpWeightService;
     }
 
     /** 岗位列表的结构化筛选条件（空值表示不限）。 */
@@ -41,10 +47,6 @@ public class JobService {
     }
 
     public record MatchWeights(int skills, int role, int experience, int education, int city, int evidence) {
-        public static MatchWeights defaults() {
-            return new MatchWeights(35, 20, 15, 10, 5, 5);
-        }
-
         public MatchWeights sanitized() {
             return new MatchWeights(
                     clampWeight(skills), clampWeight(role), clampWeight(experience),
@@ -56,13 +58,18 @@ public class JobService {
             return skills + role + experience + education + city + evidence;
         }
 
+        public AgentMatchWeights asAgentWeights() {
+            return new AgentMatchWeights(skills, role, experience, education, city, evidence);
+        }
+
         private static int clampWeight(int value) {
             return Math.max(0, Math.min(MAX_WEIGHT, value));
         }
     }
 
     private record SkillMatch(List<String> matched, List<String> missing, double coverage,
-                              double factor, int requiredCount) {}
+                              double factor, int requiredCount, boolean verificationFailure,
+                              List<String> verificationNotes) {}
     private record RoleMatch(double factor, String detail) {}
     private record ExperienceMatch(double factor, String detail, boolean hardMismatch) {}
     private record EducationMatch(double factor, String detail) {}
@@ -89,6 +96,82 @@ public class JobService {
         return repository.count();
     }
 
+    /** 返回全库 ACTIVE 岗位的城市分布；多城市岗位会分别计入每个城市。 */
+    @Transactional(readOnly = true)
+    public List<CityJobCount> cityCounts() {
+        Map<String, Long> counts = new LinkedHashMap<>();
+        for (Object[] row : repository.countActiveByCity()) {
+            String raw = row[0] == null ? "" : String.valueOf(row[0]);
+            long amount = row[1] instanceof Number number ? number.longValue() : 0L;
+            Arrays.stream(raw.split("[,，;；/|、]+"))
+                    .map(String::trim).filter(value -> !value.isBlank()).distinct()
+                    .forEach(city -> counts.merge(city, amount, Long::sum));
+        }
+        return counts.entrySet().stream()
+                .sorted(Map.Entry.<String, Long>comparingByValue().reversed()
+                        .thenComparing(Map.Entry.comparingByKey()))
+                .map(entry -> new CityJobCount(entry.getKey(), entry.getValue()))
+                .toList();
+    }
+
+    /**
+     * 城市全量岗位库。与 Agent 推荐不同，这里返回该城市所有符合条件的 ACTIVE 岗位，
+     * 使用规则匹配分作为浏览时的参考分，并分页避免一次渲染上千张卡片。
+     */
+    @Transactional(readOnly = true)
+    public CityJobPage cityJobs(ResumeView resume, String city, String keyword, String sort,
+                                int page, int size, JobFilter filter) {
+        String targetCity = safe(city);
+        if (targetCity.isBlank()) throw new BusinessException("请选择要查看的城市");
+        int safePage = Math.max(0, page);
+        int safeSize = Math.max(1, Math.min(size, 200));
+        JobFilter safeFilter = filter == null ? JobFilter.empty() : filter;
+        List<JobEntity> candidates = repository.findRecommendationCandidates(targetCity).stream()
+                .filter(this::isVisible)
+                .filter(job -> matchesKeyword(job, keyword))
+                .filter(job -> matchesFilter(job, safeFilter))
+                .toList();
+        Set<String> owned = normalize(resume.skills());
+
+        List<JobRecommendation> items;
+        long total;
+        if ("latest".equalsIgnoreCase(safe(sort))) {
+            List<JobEntity> sorted = new ArrayList<>(candidates);
+            sorted.sort(Comparator.comparing(this::latestJobTime,
+                    Comparator.nullsLast(Comparator.reverseOrder())));
+            total = sorted.size();
+            int from = Math.min(sorted.size(), safePage * safeSize);
+            int to = Math.min(sorted.size(), from + safeSize);
+            items = sorted.subList(from, to).stream()
+                    .map(job -> score(resume, job, owned, ahpWeightsForJob(job))).toList();
+        } else {
+            List<JobRecommendation> scored = candidates.stream()
+                    .map(job -> score(resume, job, owned, ahpWeightsForJob(job)))
+                    .sorted(Comparator.comparingInt(JobRecommendation::matchScore).reversed())
+                    .toList();
+            total = scored.size();
+            int from = Math.min(scored.size(), safePage * safeSize);
+            int to = Math.min(scored.size(), from + safeSize);
+            items = scored.subList(from, to);
+        }
+        return new CityJobPage(targetCity, total, safePage, safeSize, items);
+    }
+
+    private boolean matchesKeyword(JobEntity job, String keyword) {
+        String key = safe(keyword).toLowerCase(Locale.ROOT);
+        if (key.isBlank()) return true;
+        String haystack = String.join(" ", safe(job.getTitle()), safe(job.getCompany()), safe(job.getCity()),
+                safe(job.getSearchText()), safe(job.getDescription()), safe(job.getJobDescription()),
+                safe(job.getJobRequirements())).toLowerCase(Locale.ROOT);
+        return haystack.contains(key);
+    }
+
+    private LocalDateTime latestJobTime(JobEntity job) {
+        if (job.getLastSeenAt() != null) return job.getLastSeenAt();
+        if (job.getCollectedAt() != null) return job.getCollectedAt();
+        return job.getPublishedAt();
+    }
+
     @Transactional(readOnly = true)
     public JobView get(Long id) {
         return toView(getEntity(id));
@@ -101,7 +184,7 @@ public class JobService {
 
     @Transactional(readOnly = true)
     public List<JobRecommendation> recommend(ResumeView resume, String city, int limit) {
-        return recommend(resume, city, limit, MatchWeights.defaults(), List.of());
+        return recommend(resume, city, limit, null, List.of());
     }
 
     @Transactional(readOnly = true)
@@ -113,19 +196,19 @@ public class JobService {
     public List<JobRecommendation> recommend(ResumeView resume, String city, int limit,
                                               MatchWeights requestedWeights, Collection<String> excludedCities,
                                               JobFilter filter) {
-        MatchWeights weights = requestedWeights == null ? MatchWeights.defaults() : requestedWeights.sanitized();
-        if (weights.total() <= 0) weights = MatchWeights.defaults();
+        MatchWeights fixedWeights = requestedWeights == null ? null : requestedWeights.sanitized();
+        if (fixedWeights != null && fixedWeights.total() <= 0) fixedWeights = null;
         Set<String> owned = normalize(resume.skills());
         Set<String> excluded = normalizeCityFilters(excludedCities);
         String targetCity = city == null ? "" : city.trim();
         JobFilter safeFilter = filter == null ? JobFilter.empty() : filter;
-        MatchWeights finalWeights = weights;
+        MatchWeights finalWeights = fixedWeights;
         return repository.findRecommendationCandidates(targetCity).stream()
                 .filter(this::isVisible)
                 .filter(job -> targetCity.isBlank() || matchesCity(job.getCity(), targetCity))
                 .filter(job -> !isExcludedCity(job.getCity(), excluded))
                 .filter(job -> matchesFilter(job, safeFilter))
-                .map(job -> score(resume, job, owned, finalWeights))
+                .map(job -> score(resume, job, owned, finalWeights == null ? ahpWeightsForJob(job) : finalWeights))
                 .sorted(Comparator.comparingInt(JobRecommendation::matchScore).reversed())
                 .limit(Math.max(1, limit))
                 .toList();
@@ -169,32 +252,177 @@ public class JobService {
     private boolean blank(String value) { return value == null || value.isBlank(); }
 
     /**
-     * Agent 精排：对给定岗位按「岗位自身要求」打分，并与规则分融合。
-     * 最终分 = Agent 0.7 + 规则 0.3；Agent 不可用时返回 available=false。
+     * Agent 精排：Agent 根据岗位实际要求给出受限权重，后端再用确定性规则因子计算分数。
+     * Agent 不直接输出分数；缺少结果或权重非法时逐个岗位回退到默认规则。
      */
     @Transactional(readOnly = true)
     public AgentMatchResponse agentRerank(ResumeView resume, List<Long> jobIds) {
-        if (jobIds == null || jobIds.isEmpty()) return new AgentMatchResponse(false, List.of());
-        List<JobView> jobs = jobIds.stream().distinct().limit(20).map(this::get).toList();
-        LangGraphMatchClient.RerankResult result = matchClient.rerank(resume, jobs);
-        if (result == null || !result.available()) return new AgentMatchResponse(false, List.of());
-
-        Map<Long, LangGraphMatchClient.AgentScore> byId = new HashMap<>();
-        for (LangGraphMatchClient.AgentScore item : result.items()) byId.put(item.jobId(), item);
-
-        List<AgentMatchItem> items = new ArrayList<>();
-        for (JobView job : jobs) {
-            LangGraphMatchClient.AgentScore agent = byId.get(job.id());
-            if (agent == null) continue;
-            int rule = evaluate(resume, job.id()).matchScore();
-            int fused = (int) Math.round(agent.score() * 0.7 + rule * 0.3);
-            List<MatchBreakdown> breakdown = agent.breakdown().stream()
-                    .map(row -> new MatchBreakdown(row.requirement(), row.importance(), row.status(), row.evidence()))
-                    .toList();
-            items.add(new AgentMatchItem(job.id(), rule, agent.score(), fused,
-                    agent.verdict(), agent.reason(), breakdown));
+        if (resume == null || jobIds == null || jobIds.isEmpty()) {
+            return new AgentMatchResponse(false, List.of());
         }
-        return new AgentMatchResponse(!items.isEmpty(), items);
+        List<JobEntity> entities = jobIds.stream().distinct().limit(20).map(this::getEntity).toList();
+        Map<Long, AgentMatchItem> byId = new LinkedHashMap<>();
+        List<JobEntity> missing = new ArrayList<>();
+        for (JobEntity entity : entities) {
+            AgentMatchItem cached = matchCache.get(resume, entity);
+            if (cached != null) byId.put(entity.getId(), cached);
+            else missing.add(entity);
+        }
+
+        if (!missing.isEmpty()) {
+            List<JobView> views = missing.stream().map(this::toView).toList();
+            LangGraphMatchClient.RerankResult result = matchClient.rerank(resume, views);
+            if (result != null && result.available()) {
+                Map<Long, LangGraphMatchClient.AgentScore> agentScores = new HashMap<>();
+                for (LangGraphMatchClient.AgentScore score : result.items()) {
+                    agentScores.put(score.jobId(), score);
+                }
+                for (JobEntity entity : missing) {
+                    LangGraphMatchClient.AgentScore agent = agentScores.get(entity.getId());
+                    if (agent == null) continue;
+                    AgentMatchItem item = buildAgentMatch(resume, entity, agent);
+                    byId.put(entity.getId(), item);
+                    if ("AGENT".equals(item.scoreSource())) matchCache.put(resume, entity, item);
+                }
+            }
+        }
+        for (JobEntity entity : missing) {
+            if (!byId.containsKey(entity.getId())) {
+                AgentMatchItem fallback = ruleFallbackMatch(resume, entity,
+                        "Agent 未返回该岗位的有效权重，使用默认规则分兜底");
+                byId.put(entity.getId(), fallback);
+            }
+        }
+
+        List<AgentMatchItem> items = entities.stream()
+                .map(entity -> byId.get(entity.getId()))
+                .filter(java.util.Objects::nonNull)
+                .toList();
+        boolean available = items.stream().anyMatch(item -> "AGENT".equals(item.scoreSource()));
+        return new AgentMatchResponse(available, items);
+    }
+
+    /**
+     * 单个岗位的统一岗位适配度。
+     * 优先复用推荐页缓存的 Agent 结果；未命中时才调用 Agent，Agent 失败则明确标记规则兜底。
+     */
+    @Transactional(readOnly = true)
+    public AgentMatchItem targetMatch(ResumeView resume, Long jobId) {
+        if (resume == null || jobId == null) return null;
+        JobEntity entity = getEntity(jobId);
+        AgentMatchItem cached = matchCache.get(resume, entity);
+        if (cached != null) return cached;
+
+        LangGraphMatchClient.RerankResult result = matchClient.rerank(resume, List.of(toView(entity)));
+        if (result != null && result.available()) {
+            for (LangGraphMatchClient.AgentScore score : result.items()) {
+                if (!java.util.Objects.equals(score.jobId(), jobId)) continue;
+                AgentMatchItem item = buildAgentMatch(resume, entity, score);
+                if ("AGENT".equals(item.scoreSource())) matchCache.put(resume, entity, item);
+                return item;
+            }
+        }
+
+        return ruleFallbackMatch(resume, entity, "Agent 不可用，使用默认规则分兜底");
+    }
+
+    private AgentMatchItem ruleFallbackMatch(ResumeView resume, JobEntity entity, String reason) {
+        MatchWeights ahpWeights = ahpWeightsForJob(entity);
+        JobRecommendation rule = score(resume, entity, normalize(resume.skills()), ahpWeights);
+        return new AgentMatchItem(entity.getId(), rule.matchScore(), rule.matchScore(), rule.matchScore(),
+                rule.matchLevel(), reason, List.of(), ahpWeights.asAgentWeights(),
+                rule.scoreBreakdown(), "RULE_FALLBACK");
+    }
+
+    private AgentMatchItem buildAgentMatch(ResumeView resume, JobEntity entity,
+                                           LangGraphMatchClient.AgentScore agent) {
+        if (agent.weights() == null) {
+            return ruleFallbackMatch(resume, entity, "Agent 未返回有效权重，使用默认规则分兜底");
+        }
+        JobRecommendation baseline = score(resume, entity, normalize(resume.skills()), ahpWeightsForJob(entity));
+        MatchWeights adjustedWeights = weightsFromAgent(agent.weights());
+        JobRecommendation adjusted = score(resume, entity, normalize(resume.skills()), adjustedWeights);
+        List<MatchBreakdown> breakdown = effectiveAgentBreakdown(resume, entity, agent.breakdown());
+        String reason = agent.reason() == null || agent.reason().isBlank()
+                ? "Agent 已按岗位要求生成受限权重，最终分由确定性规则计算"
+                : agent.reason();
+        SkillProficiencyView failedJava = failedVerifiedSkill(resume, entity, "Java");
+        if (failedJava != null && !reason.contains("水平测试")) {
+            reason += "；Java 水平测试仅 " + failedJava.score() + " 分（" + safe(failedJava.verifiedLevel())
+                    + "），不满足熟练 Java 要求";
+        }
+        return new AgentMatchItem(entity.getId(), baseline.matchScore(), adjusted.matchScore(),
+                adjusted.matchScore(), adjusted.matchLevel(), reason,
+                breakdown, adjustedWeights.asAgentWeights(), adjusted.scoreBreakdown(), "AGENT");
+    }
+
+    private List<MatchBreakdown> effectiveAgentBreakdown(ResumeView resume, JobEntity job,
+                                                         List<LangGraphMatchClient.Breakdown> rows) {
+        List<MatchBreakdown> result = new ArrayList<>();
+        SkillProficiencyView failedJava = failedVerifiedSkill(resume, job, "Java");
+        boolean replaced = false;
+        for (LangGraphMatchClient.Breakdown row : rows) {
+            boolean javaRow = row.requirement().toLowerCase(Locale.ROOT).contains("java");
+            if (failedJava != null && javaRow) {
+                result.add(new MatchBreakdown(row.requirement(), row.importance(), "不满足",
+                        "Java 水平测试 " + failedJava.score() + " 分（" + safe(failedJava.verifiedLevel())
+                                + "），测试结果优先于技能自述和项目描述"));
+                replaced = true;
+            } else {
+                result.add(new MatchBreakdown(row.requirement(), row.importance(), row.status(), row.evidence()));
+            }
+        }
+        if (failedJava != null && !replaced) {
+            result.add(0, new MatchBreakdown("熟练掌握 Java", "硬性", "不满足",
+                    "Java 水平测试 " + failedJava.score() + " 分（" + safe(failedJava.verifiedLevel()) + "）"));
+        }
+        return result;
+    }
+
+    private SkillProficiencyView failedVerifiedSkill(ResumeView resume, JobEntity job, String skill) {
+        if (resume.skillProficiencies() == null) return null;
+        boolean required = jsonCodec.readList(job.getSkillsJson(), String.class).stream()
+                .map(this::normalizeSkill).anyMatch(normalizeSkill(skill)::equals);
+        if (!required) return null;
+        return resume.skillProficiencies().stream()
+                .filter(item -> item != null && normalizeSkill(item.skill()).equals(normalizeSkill(skill)))
+                .filter(item -> item.score() != null && item.score() < 45)
+                .findFirst().orElse(null);
+    }
+
+    private MatchWeights weightsFromAgent(AgentMatchWeights weights) {
+        if (weights == null) return asMatchWeights(ahpWeightService.baselineWeights());
+        return new MatchWeights(
+                bounded(weights.skills(), 20, 50),
+                bounded(weights.role(), 10, 35),
+                bounded(weights.experience(), 0, 30),
+                bounded(weights.education(), 0, 20),
+                bounded(weights.city(), 0, 15),
+                bounded(weights.evidence(), 0, 25)
+        );
+    }
+
+    private int bounded(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private MatchWeights ahpWeightsForJob(JobEntity job) {
+        return asMatchWeights(ahpWeightService.weightsForJob(job));
+    }
+
+    private MatchWeights asMatchWeights(AgentMatchWeights weights) {
+        return new MatchWeights(weights.skills(), weights.role(), weights.experience(),
+                weights.education(), weights.city(), weights.evidence());
+    }
+
+    @Transactional(readOnly = true)
+    public AhpWeightProfile ahpProfile(Long jobId) {
+        return jobId == null ? ahpWeightService.profile()
+                : ahpWeightService.profileForJob(getEntity(jobId));
+    }
+
+    public Map<String, Object> matchCacheStats() {
+        return matchCache.stats();
     }
 
     @Transactional(readOnly = true)
@@ -208,7 +436,7 @@ public class JobService {
     @Transactional(readOnly = true)
     public JobRecommendation evaluate(ResumeView resume, Long jobId) {
         JobEntity job = getEntity(jobId);
-        return score(resume, job, normalize(resume.skills()), MatchWeights.defaults());
+        return score(resume, job, normalize(resume.skills()), ahpWeightsForJob(job));
     }
     @Transactional
     public List<JobView> importJobs(List<JobImport> imports) {
@@ -266,7 +494,7 @@ public class JobService {
     }
 
     private JobRecommendation score(ResumeView resume, JobEntity job, Set<String> owned, MatchWeights weights) {
-        SkillMatch skill = matchSkills(job, owned);
+        SkillMatch skill = matchSkills(job, owned, resume);
         RoleMatch role = matchRole(resume, job);
         ExperienceMatch experience = matchExperience(resume, job);
         EducationMatch education = matchEducation(resume, job);
@@ -288,26 +516,35 @@ public class JobService {
         int hardCap = 100;
         List<String> capReasons = new ArrayList<>();
 
-        if (weights.skills() > 0 && skill.requiredCount() > 0 && skill.coverage() < 0.5) {
-            hardCap = Math.min(hardCap, 69);
+        // 硬性条件不受 Agent 调权影响，避免通过把某项权重调低来绕过岗位门槛。
+        if (skill.requiredCount() > 0 && skill.coverage() < 0.5) {
+            hardCap = Math.min(hardCap, 55);
             capReasons.add("核心技能覆盖率不足 50%");
         }
-        if (weights.role() > 0 && role.factor() < 0.25) {
-            hardCap = Math.min(hardCap, 70);
+        if (role.factor() < 0.25) {
+            hardCap = Math.min(hardCap, 45);
             capReasons.add("岗位方向与目标岗位差异较大");
         }
-        if (weights.experience() > 0 && experience.hardMismatch()) {
-            hardCap = Math.min(hardCap, 65);
+        if (experience.hardMismatch()) {
+            hardCap = Math.min(hardCap, 45);
             capReasons.add("工作经验低于岗位要求");
         }
-        if (weights.education() > 0 && education.factor() < 0.5) {
-            hardCap = Math.min(hardCap, 70);
+        if (skill.verificationFailure()) {
+            hardCap = Math.min(hardCap, 50);
+            capReasons.add("岗位核心技能未通过水平验证");
+        }
+        if (!resume.educationVerified()) {
+            hardCap = Math.min(hardCap, 55);
+            capReasons.add("学历材料未通过真实性核验");
+        } else if (education.factor() < 0.5) {
+            hardCap = Math.min(hardCap, 55);
             capReasons.add("学历低于岗位要求");
         }
         if (weights.city() > 0 && city.factor() == 0) {
             hardCap = Math.min(hardCap, 75);
             capReasons.add("城市与期望城市不匹配");
         }
+        if (capReasons.size() >= 2) hardCap = Math.min(hardCap, 40);
         score = Math.max(0, Math.min(100, Math.min(score, hardCap)));
 
         List<MatchScoreComponent> breakdown = dimensions.stream().map(item -> new MatchScoreComponent(
@@ -318,6 +555,9 @@ public class JobService {
         List<String> reasons = new ArrayList<>();
         if (!skill.matched().isEmpty()) reasons.add("已覆盖 " + joinPreview(skill.matched(), 4));
         if (!skill.missing().isEmpty()) reasons.add("建议补强 " + joinPreview(skill.missing(), 3));
+        if (!skill.verificationNotes().isEmpty()) {
+            reasons.add("水平测试：" + String.join("；", skill.verificationNotes().stream().limit(3).toList()));
+        }
         if (weights.role() > 0) reasons.add(role.detail());
         if (weights.experience() > 0 && experience.factor() < 0.999) reasons.add(experience.detail());
         if (weights.education() > 0 && education.factor() < 0.999) reasons.add(education.detail());
@@ -328,40 +568,85 @@ public class JobService {
         String level = score >= 85 ? "高度匹配" : score >= 70 ? "较为匹配" : score >= 55 ? "可以尝试" : "不建议优先";
         return new JobRecommendation(toView(job), score, level, skill.matched(), skill.missing(), reasons, breakdown);
     }
-    private SkillMatch matchSkills(JobEntity job, Set<String> owned) {
+    private SkillMatch matchSkills(JobEntity job, Set<String> owned, ResumeView resume) {
         List<String> rawSkills = jsonCodec.readList(job.getSkillsJson(), String.class);
         LinkedHashMap<String, String> required = new LinkedHashMap<>();
         for (String value : rawSkills) {
             String key = normalizeSkill(value);
             if (!key.isBlank()) required.putIfAbsent(key, value.trim());
         }
+        Map<String, SkillProficiencyView> tested = new LinkedHashMap<>();
+        if (resume.skillProficiencies() != null) {
+            for (SkillProficiencyView item : resume.skillProficiencies()) {
+                if (item != null && item.skill() != null) tested.put(normalizeSkill(item.skill()), item);
+            }
+        }
+
         List<String> matched = new ArrayList<>();
         List<String> missing = new ArrayList<>();
+        List<String> verificationNotes = new ArrayList<>();
+        boolean verificationFailure = false;
         double matchedWeight = 0;
         double totalWeight = 0;
         int index = 0;
         for (Map.Entry<String, String> item : required.entrySet()) {
             double importance = index < 3 ? 1.2 : 1.0;
             totalWeight += importance;
-            if (owned.contains(item.getKey())) {
-                matchedWeight += importance;
-                matched.add(item.getValue());
+            SkillProficiencyView verification = tested.get(item.getKey());
+            double credit;
+            if (verification != null && (verification.score() != null || verification.verifiedLevel() != null)) {
+                credit = verifiedSkillCredit(verification);
+                if (credit < 0.45) verificationFailure = true;
+                verificationNotes.add(item.getValue() + "水平测试" + (verification.score() == null ? "" : verification.score() + "分")
+                        + "（" + safe(verification.verifiedLevel()) + "）");
             } else {
-                missing.add(item.getValue());
+                credit = owned.contains(item.getKey()) ? 1.0 : 0.0;
             }
+            matchedWeight += importance * credit;
+            if (credit >= 0.60) matched.add(item.getValue()); else missing.add(item.getValue());
             index++;
         }
-        if (required.isEmpty()) return new SkillMatch(matched, missing, 0, 0.4, 0);
+        if (required.isEmpty()) return new SkillMatch(matched, missing, 0, 0.4, 0, false, List.of());
         double coverage = totalWeight == 0 ? 0 : matchedWeight / totalWeight;
         double confidence = Math.min(1.0, 0.65 + required.size() * 0.12);
-        return new SkillMatch(matched, missing, coverage, clamp01(coverage * confidence), required.size());
+        return new SkillMatch(matched, missing, coverage, clamp01(coverage * confidence), required.size(),
+                verificationFailure, List.copyOf(verificationNotes));
+    }
+
+    private double verifiedSkillCredit(SkillProficiencyView verification) {
+        int score = verification.score() == null ? -1 : verification.score();
+        String level = safe(verification.verifiedLevel());
+        if (score >= 80 || level.contains("高级")) return 1.0;
+        if (score >= 60 || level.contains("中级")) return 0.65;
+        if (score >= 45 || level.contains("初级")) return 0.30;
+        return 0.0;
     }
 
     private RoleMatch matchRole(ResumeView resume, JobEntity job) {
         Set<String> targetFamilies = detectRoleFamilies(safe(resume.targetRole()), List.of());
         if (targetFamilies.isEmpty()) targetFamilies = detectRoleFamilies("", resume.skills());
-        Set<String> jobFamilies = detectRoleFamilies(job.getTitle(), jsonCodec.readList(job.getSkillsJson(), String.class));
         if (targetFamilies.isEmpty()) return new RoleMatch(0.4, "目标岗位信息不足，方向按中性值估算");
+
+        List<String> jobSkills = jsonCodec.readList(job.getSkillsJson(), String.class);
+        Set<String> titleFamilies = detectRoleFamilies(job.getTitle(), List.of());
+        Set<String> skillFamilies = detectRoleFamilies("", jobSkills);
+
+        // 岗位标题代表主方向，技能只作为辅助证据，避免“Android 岗位因为要求 Java 被识别成 Java 后端”。
+        if (!titleFamilies.isEmpty()) {
+            boolean titleMatches = targetFamilies.stream().anyMatch(titleFamilies::contains);
+            if (titleMatches) {
+                double factor = titleFamilies.size() > 1 ? 0.85 : 1.0;
+                return new RoleMatch(factor, factor >= 1 ? "岗位主方向与目标方向一致" : "岗位为复合方向，包含目标方向");
+            }
+            double adjacent = adjacentRoleFactor(targetFamilies, titleFamilies);
+            if (adjacent > 0) return new RoleMatch(adjacent, "岗位主方向与目标方向相邻，可迁移");
+            boolean skillOverlap = targetFamilies.stream().anyMatch(skillFamilies::contains);
+            if (skillOverlap) return new RoleMatch(0.20, "岗位主方向不同，仅部分技能标签重叠");
+            return new RoleMatch(0, "岗位主方向与目标岗位差异较大");
+        }
+
+        Set<String> jobFamilies = new LinkedHashSet<>(titleFamilies);
+        jobFamilies.addAll(skillFamilies);
         if (jobFamilies.isEmpty()) return new RoleMatch(0.5, "岗位方向标签不足，方向按中性值估算");
         boolean intersects = targetFamilies.stream().anyMatch(jobFamilies::contains);
         if (intersects) {
@@ -375,7 +660,7 @@ public class JobService {
 
     private ExperienceMatch matchExperience(ResumeView resume, JobEntity job) {
         double candidateYears = estimateCandidateYears(resume);
-        ExperienceRequirement requirement = parseExperienceRequirement(job.getExperience());
+        ExperienceRequirement requirement = resolveExperienceRequirement(job);
         if (requirement.unlimited()) return new ExperienceMatch(1.0, "岗位经验要求不限", false);
         if (candidateYears + 0.01 >= requirement.min()) {
             if (requirement.max() > 0 && candidateYears > requirement.max() + 1) {
@@ -387,21 +672,48 @@ public class JobService {
         double gap = requirement.min() - candidateYears;
         double factor = Math.max(0, 1.0 - gap / Math.max(1.0, requirement.min()));
         boolean hardMismatch = gap > 1.0;
+        String structured = safe(job.getExperience());
+        String source = structured.isBlank() || structured.contains("不限") ? "任职要求" : "岗位经验";
         return new ExperienceMatch(factor,
-                "当前约 " + formatYears(candidateYears) + " 经验，岗位要求 " + safe(job.getExperience()),
+                "当前约 " + formatYears(candidateYears) + " 经验，" + source + "要求 " + formatYears(requirement.min()) + " 以上",
                 hardMismatch);
     }
 
+    private ExperienceRequirement resolveExperienceRequirement(JobEntity job) {
+        ExperienceRequirement structured = parseExperienceRequirement(job.getExperience());
+        if (!structured.unlimited()) return structured;
+        ExperienceRequirement fromRequirements = parseExperienceRequirement(job.getJobRequirements());
+        if (!fromRequirements.unlimited()) return fromRequirements;
+        return structured;
+    }
+
     private EducationMatch matchEducation(ResumeView resume, JobEntity job) {
+        if (!resume.educationVerified()) {
+            double factor = "MISMATCH".equals(resume.educationVerificationStatus()) ? 0.0 : 0.20;
+            String detail = "MISMATCH".equals(resume.educationVerificationStatus())
+                    ? "学历材料与简历不一致，真实性核验未通过，按不合格学历计"
+                    : "学历材料尚未通过真实性核验，暂按不合格学历计";
+            return new EducationMatch(factor, detail);
+        }
+
         String requiredText = safe(job.getEducation());
-        if (requiredText.isBlank() || requiredText.contains("不限")) return new EducationMatch(1.0, "学历不限");
+        if (requiredText.isBlank() || requiredText.contains("不限")) {
+            String requirements = safe(job.getJobRequirements());
+            if (requirements.contains("博士")) requiredText = "博士";
+            else if (requirements.contains("硕士")) requiredText = "硕士";
+            else if (requirements.contains("本科")) requiredText = "本科";
+            else if (requirements.contains("大专")) requiredText = "大专";
+        }
+        if (requiredText.isBlank() || requiredText.contains("不限")) {
+            return new EducationMatch(1.0, "学历不限；学历材料真实性已通过");
+        }
         int required = educationRank(requiredText);
         int owned = educationRank(resume.education());
-        if (required <= 0) return new EducationMatch(0.75, "岗位学历字段无法识别，按中性值估算");
-        if (owned <= 0) return new EducationMatch(0.4, "简历学历信息不足");
-        if (owned >= required) return new EducationMatch(1.0, "学历满足岗位要求");
-        if (owned == required - 1) return new EducationMatch(0.25, "学历低于岗位要求一档");
-        return new EducationMatch(0, "学历明显低于岗位要求");
+        if (required <= 0) return new EducationMatch(0.75, "岗位学历字段无法识别，按中性值估算；真实性已通过");
+        if (owned <= 0) return new EducationMatch(0.4, "简历学历信息不足，但材料真实性已通过");
+        if (owned >= required) return new EducationMatch(1.0, "学历满足岗位要求；真实性已通过");
+        if (owned == required - 1) return new EducationMatch(0.25, "学历低于岗位要求一档；真实性已通过");
+        return new EducationMatch(0, "学历明显低于岗位要求；真实性已通过");
     }
 
     private CityMatch matchCity(ResumeView resume, JobEntity job) {
@@ -439,7 +751,7 @@ public class JobService {
         addFamily(families, value, "devops", "运维", "sre", "devops", "kubernetes", "k8s", "docker", "linux", "云原生", "系统运维");
         addFamily(families, value, "test", "测试", "qa", "质量保障", "自动化测试");
         addFamily(families, value, "security", "安全工程师", "渗透测试", "信息安全", "网络安全", "secops");
-        addFamily(families, value, "mobile", "android", "ios", "移动端", "客户端开发");
+        addFamily(families, value, "mobile", "android", "安卓", "鸿蒙", "ios", "移动端", "客户端开发", "kotlin", "flutter", "react native");
         addFamily(families, value, "embedded", "嵌入式", "单片机", "驱动开发", "硬件工程师");
         addFamily(families, value, "game", "游戏开发", "unity", "unreal", "ue4", "ue5");
         addFamily(families, value, "product", "产品经理", "产品设计", "产品开发");
@@ -481,15 +793,16 @@ public class JobService {
 
     private ExperienceRequirement parseExperienceRequirement(String value) {
         String text = safe(value).trim();
-        if (text.isBlank() || containsAny(text, "不限", "无要求", "应届", "在校", "实习")) {
-            return new ExperienceRequirement(0, 1, true);
-        }
+        if (text.isBlank()) return new ExperienceRequirement(0, 1, true);
         Matcher range = EXPERIENCE_RANGE.matcher(text);
         if (range.find()) return new ExperienceRequirement(parseDouble(range.group(1)), parseDouble(range.group(2)), false);
         Matcher above = EXPERIENCE_ABOVE.matcher(text);
         if (above.find()) return new ExperienceRequirement(parseDouble(above.group(1)), -1, false);
         Matcher below = EXPERIENCE_BELOW.matcher(text);
         if (below.find()) return new ExperienceRequirement(0, parseDouble(below.group(1)), false);
+        if (containsAny(text, "不限", "无要求", "应届", "在校", "实习")) {
+            return new ExperienceRequirement(0, 1, true);
+        }
         return new ExperienceRequirement(0, -1, true);
     }
 
@@ -569,7 +882,11 @@ public class JobService {
     }
     private String skillDetail(SkillMatch skill) {
         if (skill.requiredCount() == 0) return "岗位缺少结构化技能标签，按中性值估算";
-        return "覆盖 " + skill.matched().size() + "/" + skill.requiredCount() + " 项岗位技能";
+        String detail = "覆盖 " + skill.matched().size() + "/" + skill.requiredCount() + " 项岗位技能";
+        if (!skill.verificationNotes().isEmpty()) {
+            detail += "；" + String.join("；", skill.verificationNotes().stream().limit(3).toList());
+        }
+        return detail;
     }
 
     private String joinPreview(List<String> values, int limit) {

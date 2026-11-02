@@ -4,6 +4,7 @@ import com.careernav.common.ApiResponse;
 import com.careernav.domain.ApiModels.EducationVerificationResult;
 import com.careernav.service.EducationVerificationService;
 import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -30,5 +31,11 @@ public class EducationVerificationController {
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "ocrText", required = false) String ocrText) {
         return ApiResponse.ok("学历材料一致性核验完成", service.verify(id, file, ocrText));
+    }
+
+    /** 返回该简历最近一次学历材料核验结果；没有记录时 data 为 null。 */
+    @GetMapping("/{id}/education-verification")
+    public ApiResponse<EducationVerificationResult> latest(@PathVariable Long id) {
+        return ApiResponse.ok(service.latest(id));
     }
 }

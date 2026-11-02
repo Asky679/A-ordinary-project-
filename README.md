@@ -161,9 +161,16 @@ get_interview_progress
 ```
 ## 岗位推荐 Agent（简历诊断）
 
-填完简历后，Agent 会自己在岗位库里找匹配岗位。设计原则是**大模型负责理解与表达，算法负责打分**：
-所有匹配分来自已有的加权算法（技能/方向/经验/学历/城市/证据六维），模型只在两个节点介入——
-把简历翻译成检索语句，以及判断召回质量够不够、要不要换说法重搜。
+填完简历后，Agent 会自己在岗位库里找匹配岗位。设计原则是**大模型负责理解与调权，规则引擎负责打分**：
+六维基准权重由 AHP 层次分析法生成，全局基准为技能 34、方向 22、经验 16、学历 10、城市 4、证据 14，
+并通过 `CR<0.1` 的一致性校验。选择具体岗位后，系统会根据岗位的技能密度、经验级别、学历要求和工程深度
+实时生成岗位条件化 AHP 权重；六项归一化权重之和严格为 1。Agent 在此基础上继续生成受限权重，但不直接
+输出匹配分；最终分由 Java 规则引擎根据可复现的维度因子和硬性条件计算。
+
+```text
+GET /api/jobs/weights/ahp       全局 AHP 基准
+GET /api/jobs/{id}/weights/ahp 所选岗位的实时调整权重
+```
 
 ```text
 extract_profile -> recall -> rank -> reflect --(重试最多 2 次)--> gap_analysis -> compose
@@ -179,6 +186,28 @@ POST /api/diagnoses/agent?resumeId=1&city=长沙&limit=6
 返回 `recommendations`（岗位 + 分数 + 维度明细）、`skillGaps`（技能缺口）、`trace`（决策轨迹）。
 实现位于 `interview-agent/app/job_graph.py` 与 `job_tools.py`，详见
 [interview-agent/README.md](interview-agent/README.md)。
+
+## 学历真实性核验
+
+用户上传学信网报告后，系统会比对姓名、学校、学历、专业和毕业年份，并将结果保存到数据库。只有核验通过的有效学历才按正常学历计分；未核验、需复核或不一致时，学历维度按不合格处理，岗位适配度最高限制为 55 分。简历学历相关字段修改后，旧核验记录自动失效。
+
+```text
+POST /api/resumes/{id}/education-verification  上传并核验
+GET  /api/resumes/{id}/education-verification  查询最近核验结果
+```
+
+## 技能水平验证
+
+Java 水平测试会保存测试分、能力等级、置信度、BKT 掌握概率和薄弱知识点。岗位要求某项已被测试的技能时，系统优先采用测试结果，而不是只相信技能自述：
+
+```text
+测试分 < 45 或待提升   不满足，岗位适配度最高 50 分
+45～59 或初级          最多按部分满足
+60～79 或中级          按部分满足
+80 以上或高级          可按满足处理
+```
+
+测试结果会同步进入 Agent 岗位证据、岗位匹配明细和简历诊断建议。
 
 ## 面试题向量库（GitHub 公开题库）
 

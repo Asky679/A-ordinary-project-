@@ -2,6 +2,8 @@ package com.careernav.service;
 
 import com.careernav.domain.ApiModels.EducationVerificationResult;
 import com.careernav.entity.ResumeEntity;
+import com.careernav.repository.EducationVerificationRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
@@ -12,8 +14,10 @@ import org.springframework.mock.web.MockMultipartFile;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -37,13 +41,17 @@ class EducationVerificationServiceTest {
         when(resumeService.getEntity(1L)).thenReturn(resume);
         AgentModelClient agent = mock(AgentModelClient.class);
         when(agent.generateJson(anyString(), any())).thenReturn(null);
-        EducationVerificationService service = new EducationVerificationService(resumeService, agent);
+        EducationVerificationRepository repository = mock(EducationVerificationRepository.class);
+        when(repository.findByResumeId(1L)).thenReturn(Optional.empty());
+        EducationVerificationService service = new EducationVerificationService(
+                resumeService, agent, repository, new JsonCodec(new ObjectMapper()));
 
         byte[] pdf = reportPdf(fontFile);
         MockMultipartFile file = new MockMultipartFile("file", "education-report.pdf", "application/pdf", pdf);
         EducationVerificationResult result = service.verify(1L, file, null);
 
         assertEquals("CONSISTENT", result.status());
+        assertTrue(result.passed());
         assertTrue(result.officialReportDetected());
         assertEquals(100, result.score());
         assertTrue(result.checks().stream().allMatch(item -> "MATCH".equals(item.status())));
@@ -66,13 +74,17 @@ class EducationVerificationServiceTest {
         when(resumeService.getEntity(1L)).thenReturn(resume);
         AgentModelClient agent = mock(AgentModelClient.class);
         when(agent.generateJson(anyString(), any())).thenReturn(null);
-        EducationVerificationService service = new EducationVerificationService(resumeService, agent);
+        EducationVerificationRepository repository = mock(EducationVerificationRepository.class);
+        when(repository.findByResumeId(1L)).thenReturn(Optional.empty());
+        EducationVerificationService service = new EducationVerificationService(
+                resumeService, agent, repository, new JsonCodec(new ObjectMapper()));
 
         MockMultipartFile file = new MockMultipartFile(
                 "file", "education-report.pdf", "application/pdf", reportPdf(fontFile));
         EducationVerificationResult result = service.verify(1L, file, null);
 
         assertEquals("MISMATCH", result.status());
+        assertFalse(result.passed());
         assertTrue(result.checks().stream().anyMatch(item ->
                 "school".equals(item.key()) && "MISMATCH".equals(item.status())));
     }

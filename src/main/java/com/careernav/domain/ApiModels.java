@@ -31,8 +31,24 @@ public final class ApiModels {
 
     public record MatchBreakdown(String requirement, String importance, String status, String evidence) {}
 
+    /** Agent 只提供受限权重；最终分数由后端确定性规则计算。 */
+    public record AgentMatchWeights(int skills, int role, int experience,
+                                    int education, int city, int evidence) {}
+
+    /** AHP 六维基准权重及其一致性校验结果。 */
+    public record AhpCriterionWeight(String key, String label, double weight, int weightPercent) {}
+
+    public record AhpWeightProfile(String method, String scale, Long jobId, String jobTitle,
+                                   boolean jobAdjusted, List<AhpCriterionWeight> criteria,
+                                   List<List<Double>> pairwiseMatrix, double principalEigenvalue,
+                                   double consistencyIndex, double consistencyRatio, double randomIndex,
+                                   boolean consistent, double weightSum, AgentMatchWeights baselineWeights,
+                                   List<String> adjustmentReasons, String note) {}
+
     public record AgentMatchItem(Long jobId, int ruleScore, int agentScore, int finalScore,
-                                 String verdict, String reason, java.util.List<MatchBreakdown> breakdown) {}
+                                 String verdict, String reason, List<MatchBreakdown> breakdown,
+                                 AgentMatchWeights weights, List<MatchScoreComponent> scoreBreakdown,
+                                 String scoreSource) {}
 
     public record AgentMatchResponse(boolean available, java.util.List<AgentMatchItem> items) {}
 
@@ -41,7 +57,7 @@ public final class ApiModels {
                                              String proofValue, String status, String detail) {}
 
     public record EducationVerificationResult(Long resumeId, String status, String statusLabel,
-                                               int score, int confidence, String reportType,
+                                               boolean passed, int score, int confidence, String reportType,
                                                boolean officialReportDetected, String proofFileType,
                                                String proofHash, String extractionMode, String summary,
                                                List<EducationVerificationCheck> checks,
@@ -97,6 +113,10 @@ public final class ApiModels {
                              String email, String education, String school, String major,
                              Integer graduationYear, List<String> skills, List<ProjectItem> projects,
                              List<ExperienceItem> experiences, String selfEvaluation, String rawText,
+                             List<SkillProficiencyView> skillProficiencies,
+                             String educationVerificationStatus, String educationVerificationLabel,
+                             Integer educationVerificationScore, Integer educationVerificationConfidence,
+                             boolean educationVerified, LocalDateTime educationVerificationCheckedAt,
                              LocalDateTime createdAt, LocalDateTime updatedAt) {}
 
     public record JobView(Long id, String externalId, String title, String company, String city,
@@ -113,6 +133,73 @@ public final class ApiModels {
     public record JobRecommendation(JobView job, int matchScore, String matchLevel,
                                     List<String> matchedSkills, List<String> missingSkills,
                                     List<String> reasons, List<MatchScoreComponent> scoreBreakdown) {}
+
+    /** ---------- 技能水平验证 ---------- */
+    public record SkillTestStartRequest(@NotNull(message = "请选择简历") Long resumeId) {}
+
+    public record SkillOption(String key, String text) {}
+
+    public record SkillTestQuestion(Long id, String level, String topic,
+                                    String questionText, List<SkillOption> options) {}
+
+    public record SkillTestView(Long sessionId, String skill, String status,
+                                LocalDateTime startedAt, LocalDateTime expiresAt,
+                                List<SkillTestQuestion> questions) {}
+
+    public record SkillAnswer(Long questionId, String option) {}
+
+    public record SkillTestSubmitRequest(List<SkillAnswer> answers) {}
+
+    public record SkillRoundView(Long sessionId, String skill, int roundNo, int totalRounds,
+                                 String status, LocalDateTime startedAt, LocalDateTime expiresAt,
+                                 List<String> targetTopics, List<SkillTestQuestion> questions) {}
+
+    public record SkillRoundAnswer(Long questionId, String option, Integer responseMs, Double selfConfidence) {}
+
+    public record SkillRoundSubmitRequest(List<SkillRoundAnswer> answers) {}
+
+    public record SkillRoundResult(Long sessionId, int roundNo, int totalRounds, boolean completed,
+                                   SkillTestResult result, SkillRoundView nextRound,
+                                   Double guessRisk, Double consistency) {}
+
+    public record SkillLevelBreakdown(String level, int correct, int total, double accuracy) {}
+
+    public record SkillQuestionFeedback(Long questionId, String level, String topic,
+                                        String questionText, String selectedOption,
+                                        String correctOption, boolean correct, String explanation) {}
+
+    public record SkillMasteryView(String knowledgeComponent, double masteryProbability,
+                                   int attempts, int correctCount) {}
+
+    public record SkillTestResult(Long sessionId, String skill, int score, String level,
+                                  double confidence, int correctCount, int totalCount,
+                                  boolean proficiencySaved,
+                                  List<SkillLevelBreakdown> levelBreakdown,
+                                  List<String> weakTopics,
+                                  List<SkillQuestionFeedback> reviews,
+                                  Double bktMastery, Double bktConfidence,
+                                  List<SkillMasteryView> bktBreakdown,
+                                  LocalDateTime startedAt, LocalDateTime submittedAt) {}
+
+    public record SkillProficiencyView(Long resumeId, String skill, String declaredLevel,
+                                       String verifiedLevel, Integer score, Double confidence,
+                                       String evidenceType, Double bktMastery, Double bktConfidence,
+                                       Double guessRisk, Double consistency, Integer roundsCompleted,
+                                       LocalDateTime updatedAt) {
+        public SkillProficiencyView(Long resumeId, String skill, String declaredLevel, String verifiedLevel,
+                                    Integer score, Double confidence, String evidenceType, Double bktMastery,
+                                    Double bktConfidence, LocalDateTime updatedAt) {
+            this(resumeId, skill, declaredLevel, verifiedLevel, score, confidence, evidenceType,
+                    bktMastery, bktConfidence, null, null, 0, updatedAt);
+        }
+    }
+
+    /** 城市岗位库：count 为该城市 ACTIVE 岗位总数。 */
+    public record CityJobCount(String city, long count) {}
+
+    /** 城市全量岗位库分页结果，page 从 0 开始。 */
+    public record CityJobPage(String city, long total, int page, int size,
+                              List<JobRecommendation> items) {}
 
     public record InterviewStartRequest(@NotNull(message = "请选择简历") Long resumeId,
                                         @NotNull(message = "请选择目标岗位") Long jobId,
@@ -145,6 +232,8 @@ public final class ApiModels {
                                   List<DiagnosisSuggestion> suggestions,
                                   List<String> agentTrace,
                                   LearningPath learningPlan,
+                                  String jobMatchSource, Integer ruleMatchScore, Integer agentMatchScore,
+                                  List<MatchBreakdown> agentMatchBreakdown,
                                   LocalDateTime resumeUpdatedAt, LocalDateTime createdAt) {}
 
     public record LearningPathRequest(@NotNull(message = "请选择简历") Long resumeId,

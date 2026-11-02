@@ -5,9 +5,13 @@ const state = {
   diagnosis: null, jobAgent: null, learningPath: null, skillGraph: null, directions: [], atsReport: null,
   projects: [], difficulty: '标准', view: 'dashboard',
   excludedCities: [], recommendationRequestId: 0, agentMatches: new Map(),
-  agentLoading: false, agentError: ''
+  agentLoading: false, agentError: '', cityFacets: [], cityMode: false,
+  cityJobs: [], cityTotal: 0, cityPage: 0, cityLoading: false,
+  cityRequestId: 0, citySearchTimer: null, skillTest: null, skillTestTimer: null,
+  skillQuestionStartedAt: {}, skillRoundStartedAt: null,
+  ahpProfile: null
 };
-const pageTitles = { dashboard:'成长总览', resume:'简历工坊', jobs:'岗位雷达', interview:'模拟面试', diagnosis:'简历诊断' };
+const pageTitles = { dashboard:'成长总览', resume:'简历工坊', library:'简历仓库', jobs:'岗位雷达', interview:'模拟面试', diagnosis:'简历诊断' };
 const $ = (selector, root=document) => root.querySelector(selector);
 const $$ = (selector, root=document) => [...root.querySelectorAll(selector)];
 
@@ -45,6 +49,7 @@ function navigate(view) {
   $$('.view').forEach(item => item.classList.toggle('active', item.id === `view-${view}`));
   $('#page-title').textContent = pageTitles[view];
   if (view === 'resume') { const resume = primaryResume(); if (resume && !$('#resume-id').value) fillResumeForm(resume); }
+  if (view === 'library') renderResumeLibrary();
   if (view === 'jobs') renderJobs();
   if (view === 'interview') populateInterviewOptions();
   if (view === 'diagnosis') populateDiagnosisOptions();
@@ -53,11 +58,15 @@ function navigate(view) {
 
 async function boot() {
   try {
-    const [resumes, jobs, dashboard, agentStatus, directions] = await Promise.all([
+    const [resumes, jobs, dashboard, agentStatus, directions, cityFacets, ahpProfile] = await Promise.all([
       api('/api/resumes'), api('/api/jobs'), api('/api/dashboard'), api('/api/agent/status'),
-      api('/api/resume-guidance/directions').catch(() => [])
+      api('/api/resume-guidance/directions').catch(() => []),
+      api('/api/jobs/cities').catch(() => []),
+      api('/api/jobs/weights/ahp').catch(() => null)
     ]);
-    state.resumes = resumes; state.jobs = jobs; state.dashboard = dashboard; state.directions = directions || [];
+    state.resumes = resumes; state.jobs = jobs; state.dashboard = dashboard;
+    state.directions = directions || []; state.cityFacets = cityFacets || [];
+    state.ahpProfile = ahpProfile || null; renderAhpProfile();
     state.activeResumeId = resumes[0]?.id || null;
     state.activeJobId = dashboard.topJobs?.[0]?.job?.id || jobs[0]?.id || null;
     restoreMatchPreferences(); updateMatchPolicyPanel(); populateAllSelects();
@@ -69,8 +78,18 @@ async function boot() {
     $('#sidebar-agent-mode').textContent = agentStatus.mode === 'LANGCHAIN4J_ONLINE' ? '在线大模型工具链' : '本地推理工具链';
     $('#mcp-status').textContent = agentStatus.mcpEnabled ? 'REMOTE ONLINE' : 'LOCAL FALLBACK';
     // 支持 ?view=resume 这类深链接，便于分享与演示直达某个页面
-    const initialView = new URLSearchParams(location.search).get('view');
+    const params = new URLSearchParams(location.search);
+    const initialView = params.get('view');
+    const requestedCity = params.get('city');
+    if (requestedCity) {
+      const citySelect = $('#job-city-filter');
+      if (citySelect && [...citySelect.options].some(option => option.value === requestedCity)) {
+        citySelect.value = requestedCity;
+        setCityMode(true);
+      }
+    }
     if (initialView && pageTitles[initialView]) navigate(initialView);
+    if (requestedCity && state.cityMode) setTimeout(() => loadCityJobs(true), 120);
     if (new URLSearchParams(location.search).get('guidance') === '1') setTimeout(openGuidance, 600);
     if (new URLSearchParams(location.search).get('ats') === '1') setTimeout(openAts, 600);
     const jobParam = new URLSearchParams(location.search).get('job');
@@ -90,8 +109,13 @@ function populateAllSelects() {
   setOptions($('#diagnosis-resume'), state.resumes, item => item.id, item => `${item.ownerName} · ${item.targetRole}`);
   setOptions($('#interview-job'), state.jobs, item => item.id, item => `${item.title} · ${item.company}`);
   setOptions($('#diagnosis-job'), state.jobs, item => item.id, item => `${item.title} · ${item.company}`, '不指定岗位');
-  const cities = [...new Set(state.jobs.map(item => item.city).filter(Boolean))].sort((a,b) => a.localeCompare(b, 'zh-CN'));
-  setOptions($('#job-city-filter'), cities, city => city, city => city, '全部城市');
+  const cityOptions = (state.cityFacets || []).length
+    ? state.cityFacets
+    : [...new Set(state.jobs.map(item => item.city).filter(Boolean))].map(city => ({ city, count: null }));
+  setOptions($('#job-city-filter'), cityOptions,
+    item => item.city,
+    item => item.count == null ? item.city : `${item.city}（${item.count}）`,
+    '全部城市');
   setOptions($('#job-category-filter'), state.directions || [], d => d, d => d, '全部方向');
   if (state.activeResumeId) { $('#interview-resume').value = state.activeResumeId; $('#diagnosis-resume').value = state.activeResumeId; }
   if (state.activeJobId) { $('#interview-job').value = state.activeJobId; $('#diagnosis-job').value = state.activeJobId; }
@@ -189,7 +213,8 @@ function fillResumeForm(resume) {
   state.projects = (resume.projects || []).map(item => ({...item}));
   state.experiences = (resume.experiences || []).map(item => ({...item}));
   renderSkillPicker(); renderProjectEditor(); renderExperienceEditor(); updateResumePreview();
-  loadVersions(); loadFactLocks(); resetEducationVerification();
+  if ((resume.skills || []).includes('Java')) loadJavaSkillProficiency(resume.id);
+  loadVersions(); loadFactLocks(); resetEducationVerification(); loadEducationVerification(resume.id);
 }
 function emptyResume() {
   $('#resume-form').reset();
@@ -197,6 +222,7 @@ function emptyResume() {
   state.projects = [blankProject()]; state.experiences = [];
   $('#skills').value = ''; $('#education').value = '本科';
   renderSkillPicker(); renderProjectEditor(); renderExperienceEditor(); updateResumePreview();
+  if ((resume.skills || []).includes('Java')) loadJavaSkillProficiency(resume.id);
   const vbox = $('#resume-versions'); if (vbox) vbox.innerHTML = '<div class="empty-mini">保存后会在这里生成版本快照</div>';
   $$('#fact-locks input').forEach(box => { box.checked = false; });
   resetEducationVerification();
@@ -204,6 +230,8 @@ function emptyResume() {
 }
 function renderSkillPicker() {
   const selected = new Set(state.skills);
+  const javaVerify = $('#java-skill-verify');
+  if (javaVerify) javaVerify.hidden = !selected.has('Java');
   $$('#skill-picker [data-skill]').forEach(button => {
     const active = selected.has(button.dataset.skill);
     button.classList.toggle('active', active);
@@ -391,9 +419,108 @@ async function saveResume() {
     const index = state.resumes.findIndex(item => item.id === saved.id);
     if (index >= 0) state.resumes[index] = saved; else state.resumes.unshift(saved);
     state.activeResumeId = saved.id; fillResumeForm(saved); populateAllSelects(); await refreshDashboard();
-    toast('保存成功', '简历已更新，岗位匹配与诊断将使用最新内容');
+    toast('已保存到简历仓库', '岗位匹配与诊断将使用最新简历内容');
     return saved;
   } catch (error) { toast('保存失败', error.message, true); return null; }
+}
+
+/* ---------- 简历仓库 ---------- */
+function resumeCompleteness(resume) {
+  const checks = [resume?.ownerName, resume?.targetRole, resume?.city, resume?.phone || resume?.email,
+    resume?.school, resume?.major, (resume?.skills || []).length, (resume?.projects || []).length,
+    (resume?.experiences || []).length, resume?.selfEvaluation];
+  return Math.round(checks.filter(Boolean).length / checks.length * 100);
+}
+function resumeUpdatedAt(resume) {
+  return String(resume?.updatedAt || resume?.createdAt || '').replace('T', ' ').slice(0, 16) || '尚未记录';
+}
+function renderResumeLibrary() {
+  const target = $('#resume-library-grid');
+  if (!target) return;
+  const keyword = String($('#library-search')?.value || '').trim().toLowerCase();
+  const sort = $('#library-sort')?.value || 'updated';
+  let resumes = [...(state.resumes || [])].filter(resume => {
+    if (!keyword) return true;
+    const text = [resume.ownerName, resume.targetRole, resume.city, resume.school, resume.major,
+      ...(resume.skills || [])].join(' ').toLowerCase();
+    return text.includes(keyword);
+  });
+  if (sort === 'name') resumes.sort((a,b) => String(a.ownerName || '').localeCompare(String(b.ownerName || ''), 'zh-CN'));
+  else if (sort === 'complete') resumes.sort((a,b) => resumeCompleteness(b) - resumeCompleteness(a));
+  else resumes.sort((a,b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
+
+  const all = state.resumes || [];
+  if ($('#library-count')) $('#library-count').textContent = all.length;
+  if ($('#library-project-count')) $('#library-project-count').textContent = all.filter(item => (item.projects || []).length).length;
+  if ($('#library-last-updated')) $('#library-last-updated').textContent = all.length ? resumeUpdatedAt([...all].sort((a,b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))[0]).slice(0, 10) : '--';
+  if ($('#library-result-count')) $('#library-result-count').textContent = `${resumes.length} 份简历`;
+
+  if (!resumes.length) {
+    target.innerHTML = `<div class="library-empty panel"><span class="eyebrow">${all.length ? 'NO MATCH' : 'EMPTY REPOSITORY'}</span><h3>${all.length ? '没有匹配的简历' : '还没有保存的简历'}</h3><p>${all.length ? '换一个关键词试试。' : '从简历工坊新建并保存后，这里会出现可编辑、可导出的简历卡片。'}</p><button type="button" class="primary-button" data-library-action="${all.length ? 'clear' : 'new'}">${all.length ? '清除搜索' : '去创建第一份简历'}</button></div>`;
+    return;
+  }
+  target.innerHTML = resumes.map((resume,index) => {
+    const complete = resumeCompleteness(resume);
+    const skills = (resume.skills || []).slice(0,6);
+    const rest = Math.max(0, (resume.skills || []).length - skills.length);
+    return `<article class="panel library-resume-card">
+      <div class="library-card-head">
+        <div class="library-avatar">${escapeHtml(String(resume.ownerName || '简').slice(0,1))}</div>
+        <div class="library-card-title"><span class="eyebrow">RESUME #${resume.id}${index === 0 && !keyword ? ' · 最近编辑' : ''}</span><h3>${escapeHtml(resume.ownerName || '未命名简历')}</h3><p>${escapeHtml(resume.targetRole || '未填写目标岗位')}</p></div>
+        <div class="library-completion" style="--complete:${complete}"><strong>${complete}%</strong><span>完成度</span></div>
+      </div>
+      <div class="library-meta"><span>${escapeHtml(resume.city || '城市未填')}</span><span>${escapeHtml(resume.education || '学历未填')}</span><span>${escapeHtml(resume.school || '学校未填')}</span></div>
+      <div class="library-skills">${skills.map(skill => `<span>${escapeHtml(skill)}</span>`).join('')}${rest ? `<em>+${rest}</em>` : ''}${skills.length ? '' : '<small>还未选择技能</small>'}</div>
+      <div class="library-card-meta"><span>更新于 ${escapeHtml(resumeUpdatedAt(resume))}</span><span>${(resume.projects || []).length} 个项目 · ${(resume.experiences || []).length} 段经历</span></div>
+      <div class="library-card-actions"><button type="button" class="ghost-button" data-library-action="edit" data-resume-id="${resume.id}">打开编辑</button><button type="button" class="primary-button" data-library-action="pdf" data-resume-id="${resume.id}">导出 PDF</button></div>
+    </article>`;
+  }).join('');
+}
+function openResumeFromLibrary(id) {
+  const resume = state.resumes.find(item => Number(item.id) === Number(id));
+  if (!resume) { toast('无法打开', '简历不存在或已被删除', true); return; }
+  fillResumeForm(resume);
+  navigate('resume');
+  toast('已打开简历', `${resume.ownerName || '未命名'} · ${resume.targetRole || '未填写岗位'}`);
+}
+function pdfFilename(resume) {
+  const raw = `简历-${resume?.ownerName || '未命名'}-${resume?.targetRole || '目标岗位'}.pdf`;
+  return raw.replace(/[\\/:*?"<>|]/g, '-');
+}
+async function downloadResumePdf(resumeId) {
+  let id = Number(resumeId) || null;
+  if (!id) {
+    const saved = await saveResume();
+    if (!saved) return;
+    id = saved.id;
+  }
+  try {
+    const response = await fetch(`/api/resumes/${id}/pdf`);
+    if (!response.ok) {
+      let message = `导出失败 (${response.status})`;
+      try { const payload = await response.json(); message = payload.message || message; } catch { /* binary or empty body */ }
+      throw new Error(message);
+    }
+    const blob = await response.blob();
+    const resume = state.resumes.find(item => Number(item.id) === Number(id)) || {};
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url; link.download = pdfFilename(resume);
+    document.body.appendChild(link); link.click(); link.remove();
+    URL.revokeObjectURL(url);
+    toast('PDF 已导出', `${resume.ownerName || '简历'}的 A4 简历已开始下载`);
+  } catch (error) { toast('PDF 导出失败', error.message, true); }
+}
+async function exportCurrentResumePdf() {
+  const saved = await saveResume();
+  if (saved) await downloadResumePdf(saved.id);
+}
+async function refreshResumeLibrary() {
+  try {
+    state.resumes = await api('/api/resumes');
+    renderResumeLibrary(); populateAllSelects();
+    toast('简历仓库已刷新', `共 ${state.resumes.length} 份已保存简历`);
+  } catch (error) { toast('刷新失败', error.message, true); }
 }
 /* ---------- 学历材料核验 ---------- */
 function resetEducationVerification() {
@@ -409,6 +536,18 @@ function setEducationVerificationStatus(label, mode='') {
   if (!badge) return;
   badge.className = `edu-verify-badge ${mode}`.trim();
   badge.textContent = label;
+}
+async function loadEducationVerification(resumeId) {
+  if (!resumeId) { resetEducationVerification(); return null; }
+  try {
+    const report = await api(`/api/resumes/${resumeId}/education-verification`);
+    if (!report) { resetEducationVerification(); return null; }
+    renderEducationVerification(report);
+    return report;
+  } catch (error) {
+    resetEducationVerification();
+    return null;
+  }
 }
 async function extractEducationImageText(file) {
   if (!window.Tesseract) {
@@ -457,10 +596,21 @@ async function runEducationVerification(file) {
   }
 }
 function renderEducationVerification(report) {
-  const mode = report.status === 'CONSISTENT' ? 'consistent'
-    : report.status === 'MISMATCH' ? 'mismatch'
-    : report.status === 'NEEDS_REVIEW' ? 'review' : 'unknown';
-  setEducationVerificationStatus(report.statusLabel, mode);
+  const passed = Boolean(report.passed);
+  const mode = passed ? 'consistent' : 'mismatch';
+  const badgeText = passed ? '已通过 · 合格学历'
+    : report.status === 'MISMATCH' ? '未通过 · 不合格学历'
+    : '暂未通过 · 不合格学历';
+  setEducationVerificationStatus(badgeText, mode);
+  const resume = state.resumes.find(item => Number(item.id) === Number(report.resumeId));
+  if (resume) {
+    resume.educationVerified = passed;
+    resume.educationVerificationStatus = report.status;
+    resume.educationVerificationLabel = report.statusLabel;
+    resume.educationVerificationScore = report.score;
+    resume.educationVerificationConfidence = report.confidence;
+    resume.educationVerificationCheckedAt = report.checkedAt;
+  }
   const checks = (report.checks || []).map(item => {
     const cls = item.status === 'MATCH' ? 'ok' : item.status === 'MISMATCH' ? 'bad' : 'unknown';
     const label = item.status === 'MATCH' ? '一致' : item.status === 'MISMATCH' ? '不一致' : '无法判断';
@@ -475,13 +625,169 @@ function renderEducationVerification(report) {
   if (!resultBox) return;
   resultBox.innerHTML = `<div class="edu-result-head ${mode}">
       <div class="edu-result-score"><strong>${report.score}</strong><span>一致性</span></div>
-      <div class="edu-result-main"><div class="edu-result-title"><h4>${escapeHtml(report.statusLabel)}</h4><span>置信度 ${report.confidence}%</span></div>
+      <div class="edu-result-main"><div class="edu-result-title"><h4>${escapeHtml(report.statusLabel)}</h4><span>置信度 ${report.confidence}%</span><em class="edu-result-verdict ${passed ? 'pass' : 'fail'}">${passed ? '合格学历' : '不合格学历'}</em></div>
         <p>${escapeHtml(report.summary)}</p>
-        <div class="edu-result-meta"><span>${escapeHtml(report.reportType || '学历材料')}</span><span>${report.officialReportDetected ? '检测到学信网标识' : '未检测到官方报告标识'}</span><span>${report.extractionMode === 'LLM_ASSISTED' ? 'Agent 辅助抽取' : '规则抽取'}</span><span>凭证 ${escapeHtml(report.proofHash)}</span></div>
+        <div class="edu-result-meta"><span>${passed ? '真实性核验通过，可用于岗位匹配' : '真实性核验未通过，岗位匹配将降低学历评分'}</span><span>${escapeHtml(report.reportType || '学历材料')}</span><span>${report.officialReportDetected ? '检测到学信网标识' : '未检测到官方报告标识'}</span><span>${report.extractionMode === 'LLM_ASSISTED' ? 'Agent 辅助抽取' : '规则抽取'}</span><span>凭证 ${escapeHtml(report.proofHash)}</span></div>
       </div>
     </div>
     <div class="edu-check-grid">${checks}</div>
     <details class="edu-warning-list"><summary>核验边界与注意事项</summary><ul>${warnings}</ul></details>`;
+}
+/* ---------- Java 技能水平验证 ---------- */
+async function loadJavaSkillProficiency(resumeId) {
+  const badge = $('#java-proficiency-badge');
+  if (!badge || !resumeId) return;
+  try {
+    const data = await api(`/api/skills/tests/proficiency?resumeId=${resumeId}&skill=Java`);
+    if (data?.verifiedLevel) {
+      const lowScore = Number(data.score || 0) < 45;
+      badge.textContent = `${lowScore ? '测试不达标' : '已验证'} · ${data.verifiedLevel} · ${data.score ?? '--'}分 · BKT ${Math.round((data.bktMastery || 0) * 100)}%`;
+      badge.className = `skill-proficiency-badge verified ${lowScore ? 'low' : ''}`.trim();
+      badge.title = `测试得分 ${data.score ?? '--'} · 测试置信度 ${Math.round((data.confidence || 0) * 100)}% · BKT置信度 ${Math.round((data.bktConfidence || 0) * 100)}%`;
+    } else {
+      badge.textContent = '未验证';
+      badge.className = 'skill-proficiency-badge';
+      badge.title = '';
+    }
+  } catch { /* 技能验证状态失败不阻塞简历编辑 */ }
+}
+function closeJavaSkillTest() {
+  if (state.skillTestTimer) clearInterval(state.skillTestTimer);
+  state.skillTestTimer = null;
+  const modal = $('#skill-test-modal');
+  if (modal) { modal.classList.remove('open'); modal.setAttribute('aria-hidden','true'); }
+}
+async function openJavaSkillTest() {
+  const resumeId = currentResumeId();
+  if (!resumeId) { toast('无法开始验证', '请先保存一次简历', true); return; }
+  const modal = $('#skill-test-modal');
+  const body = $('#skill-test-body');
+  modal.classList.add('open'); modal.setAttribute('aria-hidden','false');
+  body.innerHTML = '<div class="loading-card"><i></i>正在生成 Java 多轮验证题目...</div>';
+  try {
+    const test = await post('/api/skills/tests/java/multi-round', { resumeId });
+    state.skillTest = test;
+    state.skillQuestionStartedAt = {};
+    state.skillRoundStartedAt = Date.now();
+    renderJavaSkillTest(test);
+    startSkillTestTimer();
+  } catch (error) {
+    body.innerHTML = `<div class="gd-error">创建测试失败：${escapeHtml(error.message)}</div>`;
+  }
+}
+function renderJavaSkillTest(test) {
+  const levelLabel = { BASIC: '初级', INTERMEDIATE: '中级', ADVANCED: '高级' };
+  const roundNo = Number(test.roundNo || 1);
+  const totalRounds = Number(test.totalRounds || 3);
+  const topics = (test.targetTopics || []).length
+    ? `<div class="skill-round-focus"><b>本轮重点</b>${test.targetTopics.map(t => `<span>${escapeHtml(t)}</span>`).join('')}</div>`
+    : '';
+  const questions = (test.questions || []).map((q, index) => `
+    <fieldset class="skill-test-question" data-question-id="${q.id}">
+      <legend><span>${String(index+1).padStart(2,'0')}</span><div><b>${escapeHtml(levelLabel[q.level] || q.level)} · ${escapeHtml(q.topic || 'Java')}</b><p>${escapeHtml(q.questionText)}</p></div></legend>
+      <div class="skill-test-options">${(q.options || []).map(o => `<label><input type="radio" name="skill-q-${q.id}" value="${escapeHtml(o.key)}"><span><b>${escapeHtml(o.key)}</b>${escapeHtml(o.text)}</span></label>`).join('')}</div>
+      <label class="skill-confidence">本题把握程度
+        <select data-question-confidence><option value="0.3">低</option><option value="0.6" selected>中</option><option value="1">高</option></select>
+      </label>
+    </fieldset>`).join('');
+  $('#skill-test-body').innerHTML = `
+    <span class="eyebrow">JAVA SKILL CHECK · MULTI-ROUND</span>
+    <h2>Java 水平验证 · 第 ${roundNo} / ${totalRounds} 轮</h2>
+    <p class="gd-sub">第 1 轮进行广度诊断，后续轮次会针对低掌握点更换题目复测。答题时间、主观把握度和 BKT 掌握概率会共同形成猜测风险。</p>
+    ${topics}
+    <div class="skill-test-toolbar"><span>本轮到计时：<b id="skill-test-countdown">--:--</b></span><span>本轮 ${test.questions?.length || 0} 题 · 难度加权</span></div>
+    <form id="skill-test-form" class="skill-test-form">${questions}</form>
+    <div class="skill-test-note">题库包含公开题与项目内部校验题。测试结果是限时抽样的能力证据，BKT 用于长期掌握追踪，不等同于官方证书。</div>
+    <div class="skill-test-actions"><button type="button" class="ghost-button" id="cancel-skill-test">取消</button><button type="button" class="primary-button" id="submit-skill-test">提交本轮</button></div>`;
+  $('#submit-skill-test').addEventListener('click', () => submitJavaSkillTest(false));
+  $('#cancel-skill-test').addEventListener('click', closeJavaSkillTest);
+  $('#skill-test-form').addEventListener('change', event => {
+    const field = event.target.closest('.skill-test-question');
+    if (!field) return;
+    const id = Number(field.dataset.questionId);
+    if (!state.skillQuestionStartedAt[id]) state.skillQuestionStartedAt[id] = Date.now();
+  });
+}
+function startSkillTestTimer() {
+  if (state.skillTestTimer) clearInterval(state.skillTestTimer);
+  const expires = new Date(state.skillTest.expiresAt).getTime();
+  const tick = () => {
+    const remaining = Math.max(0, Math.floor((expires - Date.now()) / 1000));
+    const node = $('#skill-test-countdown');
+    if (node) node.textContent = `${String(Math.floor(remaining/60)).padStart(2,'0')}:${String(remaining%60).padStart(2,'0')}`;
+    if (remaining <= 0) {
+      clearInterval(state.skillTestTimer); state.skillTestTimer = null;
+      if (state.skillTest && !state.skillTest.submitting && !state.skillTest.submitted) submitJavaSkillTest(true);
+    }
+  };
+  tick(); state.skillTestTimer = setInterval(tick, 1000);
+}
+async function submitJavaSkillTest(autoSubmit=false) {
+  if (!state.skillTest || state.skillTest.submitting || state.skillTest.submitted) return;
+  const answers = [];
+  const now = Date.now();
+  $$('#skill-test-form .skill-test-question').forEach(field => {
+    const checked = $('input[type=radio]:checked', field);
+    if (!checked) return;
+    const questionId = Number(field.dataset.questionId);
+    const startedAt = state.skillQuestionStartedAt[questionId] || state.skillRoundStartedAt || now;
+    const confidence = Number($('[data-question-confidence]', field)?.value || 0.6);
+    answers.push({ questionId, option: checked.value, responseMs: Math.max(1, now - startedAt), selfConfidence: confidence });
+  });
+  if (!autoSubmit && answers.length < state.skillTest.questions.length) {
+    if (!window.confirm(`还有 ${state.skillTest.questions.length - answers.length} 题未作答，确定提交吗？`)) return;
+  }
+  state.skillTest.submitting = true;
+  if (state.skillTestTimer) clearInterval(state.skillTestTimer);
+  state.skillTestTimer = null;
+  const button = $('#submit-skill-test');
+  if (button) { button.disabled = true; button.textContent = autoSubmit ? '时间到，正在提交...' : '正在评分...'; }
+  try {
+    const result = await post(`/api/skills/tests/${state.skillTest.sessionId}/rounds/${state.skillTest.roundNo}/submit`, { answers });
+    state.skillTest.submitting = false;
+    if (result.completed && result.result) {
+      state.skillTest.submitted = true;
+      renderJavaSkillTestResult(result.result, result);
+      return;
+    }
+    if (result.nextRound) {
+      state.skillTest = result.nextRound;
+      state.skillQuestionStartedAt = {};
+      state.skillRoundStartedAt = Date.now();
+      renderJavaSkillTest(result.nextRound);
+      startSkillTestTimer();
+      toast(`进入第 ${result.nextRound.roundNo} 轮`, '正在针对薄弱知识点更换题目复测');
+      return;
+    }
+    throw new Error('本轮结果格式异常');
+  } catch (error) {
+    state.skillTest.submitting = false;
+    if (button) { button.disabled = false; button.textContent = '提交本轮'; }
+    toast('提交失败', error.message, true);
+  }
+}
+function renderJavaSkillTestResult(result, roundResult={}) {
+  const levelLabel = { BASIC: '初级题', INTERMEDIATE: '中级题', ADVANCED: '高级题' };
+  const breakdown = (result.levelBreakdown || []).map(x => `<div class="skill-test-level"><span>${levelLabel[x.level] || x.level}</span><div><i style="width:${x.accuracy}%"></i></div><b>${x.correct}/${x.total} · ${x.accuracy}%</b></div>`).join('');
+  const weak = (result.weakTopics || []).length ? result.weakTopics.map(x => `<span>${escapeHtml(x)}</span>`).join('') : '<span class="ok">暂无明显薄弱主题</span>';
+  const bktPercent = result.bktMastery == null ? null : Math.round(result.bktMastery * 100);
+  const bktTopics = (result.bktBreakdown || []).map(x => `<div class="skill-bkt-topic"><span>${escapeHtml(x.knowledgeComponent)}</span><div><i style="width:${Math.round(x.masteryProbability * 100)}%"></i></div><b>${Math.round(x.masteryProbability * 100)}% · ${x.attempts}次</b></div>`).join('');
+  const risk = roundResult.guessRisk == null ? null : Math.round(roundResult.guessRisk * 100);
+  const consistency = roundResult.consistency == null ? null : Math.round(roundResult.consistency * 100);
+  const riskLabel = risk == null ? '--' : risk >= 60 ? '高，需要复测' : risk >= 35 ? '中，建议复测' : '低';
+  const bktPanel = bktPercent == null ? '' : `<div class="skill-bkt-panel"><div class="skill-bkt-head"><div><span class="eyebrow">BKT MASTERY TRACE</span><strong>BKT 掌握概率 ${bktPercent}%</strong></div><span>完成 ${roundResult.totalRounds || '--'} 轮验证</span></div><p>BKT 会跨轮更新知识点掌握概率，并结合作答时间、主观把握度和同知识点一致性估计猜测风险。</p><div class="skill-bkt-summary"><span>BKT 置信度 <b>${Math.round((result.bktConfidence || 0) * 100)}%</b></span><span>同知识点一致性 <b>${consistency == null ? '--' : consistency + '%'}</b></span><span>疑似猜测风险 <b class="${risk >= 60 ? 'high' : risk >= 35 ? 'mid' : 'low'}">${riskLabel}${risk == null ? '' : ' · ' + risk + '%'}</b></span></div><div class="skill-bkt-topics">${bktTopics}</div></div>`;
+  const reviews = (result.reviews || []).map((x, i) => `<div class="skill-review ${x.correct?'ok':'miss'}"><div><b>${String(i+1).padStart(2,'0')} · ${escapeHtml(x.topic || '')}</b><span>${x.correct?'正确':'错误'}</span></div><p>${escapeHtml(x.questionText)}</p><small>你的选择：${escapeHtml(x.selectedOption || '未作答')} · 正确答案：${escapeHtml(x.correctOption)}</small><em>${escapeHtml(x.explanation || '')}</em></div>`).join('');
+  $('#skill-test-body').innerHTML = `
+    <span class="eyebrow">JAVA SKILL CHECK · RESULT</span><h2>Java 水平验证结果</h2>
+    <div class="skill-result-head"><div class="skill-result-score" style="--score:${result.score}"><strong>${result.score}</strong><span>综合得分</span></div><div><h3>${escapeHtml(result.level)}</h3><p>答对 ${result.correctCount} / ${result.totalCount} 题 · 置信度 ${Math.round((result.confidence||0)*100)}%</p><span class="skill-test-status">${result.proficiencySaved ? '测试成绩已保存，并纳入岗位技能评分' : '超时提交，未写入技能画像'}</span></div></div>
+    <div class="skill-test-levels">${breakdown}</div>
+    ${bktPanel}
+    <div class="skill-test-weak"><b>薄弱主题</b><div>${weak}</div></div>
+    <div class="skill-review-list">${reviews}</div>
+    <div class="skill-test-actions"><button type="button" class="ghost-button" id="close-skill-result">关闭</button>${result.proficiencySaved ? '<button type="button" class="primary-button" id="retry-skill-test">再测一次</button>' : ''}</div>`;
+  $('#close-skill-result').addEventListener('click', closeJavaSkillTest);
+  const retry = $('#retry-skill-test'); if (retry) retry.addEventListener('click', openJavaSkillTest);
+  const resumeId = currentResumeId(); if (resumeId) loadJavaSkillProficiency(resumeId);
 }
 /* ---------- ATS 体检 ---------- */
 function openAts() {
@@ -809,6 +1115,92 @@ async function saveFactLocks() {
 }
 
 async function refreshDashboard() { state.dashboard = await api('/api/dashboard'); renderDashboard(state.dashboard); }/* jobs */
+function setCityMode(active) {
+  state.cityMode = Boolean(active);
+  const banner = $('#city-mode-banner');
+  const policy = $('#match-policy-panel');
+  const list = $('#job-list');
+  if (banner) banner.hidden = !active;
+  if (policy) policy.style.display = active ? 'none' : '';
+  if (list) list.classList.toggle('city-mode-list', active);
+}
+function cityQueryParams(page) {
+  return new URLSearchParams({
+    resumeId: state.activeResumeId,
+    city: $('#job-city-filter')?.value || '',
+    keyword: $('#job-keyword')?.value || '',
+    sort: $('#job-sort')?.value || 'match',
+    page: String(page),
+    size: '60',
+    category: $('#job-category-filter')?.value || '',
+    experience: $('#job-experience-filter')?.value || '',
+    education: $('#job-education-filter')?.value || '',
+    salaryMin: $('#job-salary-filter')?.value || '0'
+  });
+}
+async function loadCityJobs(reset=true) {
+  const city = $('#job-city-filter')?.value || '';
+  const resumeId = Number(state.activeResumeId || $('#resume-id')?.value);
+  if (!city) { setCityMode(false); return; }
+  if (!resumeId) { toast('无法进行城市筛选', '请先保存一份简历', true); return; }
+  const page = reset ? 0 : state.cityPage + 1;
+  const requestId = ++state.cityRequestId;
+  state.cityLoading = true; setCityMode(true);
+  if ($('#city-mode-title')) $('#city-mode-title').textContent = `${city} · 全部岗位`;
+  if ($('#city-mode-subtitle')) $('#city-mode-subtitle').textContent = '该城市所有有效岗位，按规则匹配度或发布时间浏览。';
+  if (reset) { state.cityJobs = []; state.cityTotal = 0; state.cityPage = 0; renderCityJobs(); }
+  try {
+    const data = await api(`/api/jobs/city?${cityQueryParams(page).toString()}`);
+    if (requestId !== state.cityRequestId) return;
+    state.cityJobs = reset ? (data.items || []) : [...state.cityJobs, ...(data.items || [])];
+    state.cityTotal = Number(data.total || 0);
+    state.cityPage = Number(data.page || page);
+    state.cityLoading = false;
+    renderCityJobs();
+  } catch (error) {
+    if (requestId !== state.cityRequestId) return;
+    state.cityLoading = false;
+    const target = $('#job-list');
+    if (target) target.innerHTML = `<div class="panel loading-card">城市岗位加载失败：${escapeHtml(error.message)}</div>`;
+    toast('城市岗位加载失败', error.message, true);
+  }
+}
+function renderCityJobs() {
+  const target = $('#job-list');
+  if (!target) return;
+  const total = state.cityTotal || 0;
+  const shown = state.cityJobs.length;
+  if ($('#job-count')) $('#job-count').textContent = `${total} 个岗位`;
+  if ($('#city-mode-total')) $('#city-mode-total').textContent = total;
+  if (!shown && !state.cityLoading) {
+    target.innerHTML = '<div class="panel loading-card">当前城市暂无符合条件的岗位。</div>';
+    return;
+  }
+  const cards = state.cityJobs.map(item => {
+    const job = item.job;
+    const matched = new Set(item.matchedSkills || []);
+    const skills = (job.skills || []).slice(0,7).map(skill => {
+      const normalized = String(skill).toLowerCase().replace(/\./g,'').replace(/\s/g,'');
+      const isMatched = [...matched].some(value => String(value).toLowerCase().replace(/\./g,'').replace(/\s/g,'') === normalized);
+      const isMissing = (item.missingSkills || []).some(value => String(value).toLowerCase().replace(/\./g,'').replace(/\s/g,'') === normalized);
+      return `<span class="skill-chip ${isMatched?'matched':isMissing?'missing':''}">${escapeHtml(skill)}</span>`;
+    }).join('');
+    const dutyPreview = compactText(job.jobDescription || job.description, 105);
+    const reqPreview = compactText(job.jobRequirements, 105);
+    const reasons = (item.reasons || []).slice(0,3).map(reason => `<span>• ${escapeHtml(reason)}</span>`).join('');
+    return `<article class="panel job-card city-job-card" data-job="${job.id}">
+      <div class="job-card-head"><div class="job-company"><div class="company-logo">${escapeHtml(String(job.company || '岗').slice(0,1))}</div><div><h3>${escapeHtml(job.title)}</h3><p>${escapeHtml(job.company)} · ${escapeHtml(job.experience || '经验不限')}</p></div></div><div class="match-badge"><span class="score-source rule">规则参考</span><strong>${item.matchScore}%</strong><span>${escapeHtml(item.matchLevel)}</span></div></div>
+      <div class="job-meta"><span class="salary">${escapeHtml(job.salary || '薪资面议')}</span><span>${escapeHtml(job.city)}</span><span>${escapeHtml(job.education || '学历不限')}</span></div>
+      <div class="job-skills">${skills}</div>
+      <div class="job-requirement-preview"><div><span>岗位职责 ${job.contentOrigin === 'AI_GENERATED' ? '<i class="ai-badge">AI生成</i>' : ''}</span><p>${escapeHtml(dutyPreview || '暂无职责摘要')}</p></div><div><span>任职要求 ${job.contentOrigin === 'AI_GENERATED' ? '<i class="ai-badge">AI生成</i>' : ''}</span><p>${escapeHtml(reqPreview || '暂无要求摘要')}</p></div></div>
+      <div class="job-reasons">${reasons}</div>
+      <span class="source-tag">${escapeHtml(job.source || '本地岗位源')}</span>
+      <div class="job-card-foot"><button class="ghost-button" data-job-action="detail" data-job-id="${job.id}">岗位详情</button><button class="primary-button" data-job-action="diagnose" data-job-id="${job.id}">诊断匹配</button><button class="primary-button" data-job-action="interview" data-job-id="${job.id}">模拟面试</button></div>
+    </article>`;
+  }).join('');
+  const footer = `<div class="city-jobs-footer panel"><div><strong>${escapeHtml($('#job-city-filter')?.value || '')}</strong><span>已显示 ${shown} / ${total} 个岗位</span></div>${shown < total ? `<button type="button" class="primary-button" data-city-action="more" ${state.cityLoading?'disabled':''}>${state.cityLoading?'加载中...':'加载更多岗位'}</button>` : '<span class="city-jobs-complete">已显示该城市全部岗位</span>'}</div>`;
+  target.innerHTML = `<div class="city-jobs-grid">${cards || '<div class="loading-card"><i></i>正在加载城市岗位...</div>'}</div>${footer}`;
+}
 async function loadRecommendations() {
   if (!state.activeResumeId) { state.recommendations = []; return; }
   const params = new URLSearchParams({
@@ -840,6 +1232,53 @@ function agentMatchForJob(jobId) {
 function scoreLevel(score) {
   return score >= 85 ? '高度匹配' : score >= 70 ? '较为匹配' : score >= 55 ? '可以尝试' : '不建议优先';
 }
+function renderAhpProfile(profile = state.ahpProfile) {
+  const chips = $('#ahp-weight-chips');
+  const status = $('#ahp-consistency');
+  if (!chips || !status) return;
+  if (!profile) {
+    chips.innerHTML = '<span class="ahp-weight-chip unavailable">AHP 基准暂不可用，岗位评分将使用后端安全默认值</span>';
+    status.textContent = '一致性状态未知';
+    return;
+  }
+  const consistency = Math.round((profile.consistencyRatio || 0) * 10000) / 100;
+  const weightSum = (profile.criteria || []).reduce((sum, item) => sum + Number(item.weight || 0), 0);
+  status.textContent = `Σw ${weightSum.toFixed(3)} · CR ${consistency}% · ${profile.consistent ? '一致性通过' : '需要复核'}`;
+  status.className = `ahp-consistency ${profile.consistent ? 'ok' : 'warn'}`;
+  const scope = profile.jobAdjusted ? `当前岗位：${profile.jobTitle || '已选岗位'}` : '全局 AHP 基准';
+  chips.innerHTML = (profile.criteria || []).map(item =>
+    `<span class="ahp-weight-chip"><b>${escapeHtml(item.label)}</b><strong>${Number(item.weight || 0).toFixed(3)}</strong></span>`
+  ).join('') + `<small>${escapeHtml(scope)} · ${escapeHtml(profile.note || 'AHP 主特征向量基准权重')}</small>`;
+}
+
+async function loadJobAhpProfile(jobId) {
+  try {
+    const profile = await api(`/api/jobs/${jobId}/weights/ahp`);
+    if (profile) {
+      state.ahpProfile = profile;
+      renderAhpProfile(profile);
+    }
+    return profile;
+  } catch (error) {
+    return null;
+  }
+}
+
+function renderJobAhpPanel(profile) {
+  if (!profile) return '';
+  const sum = (profile.criteria || []).reduce((total, item) => total + Number(item.weight || 0), 0);
+  const chips = (profile.criteria || []).map(item =>
+    `<span><b>${escapeHtml(item.label)}</b><strong>${Number(item.weight || 0).toFixed(3)}</strong></span>`
+  ).join('');
+  const reasons = (profile.adjustmentReasons || []).map(reason => `<li>${escapeHtml(reason)}</li>`).join('');
+  return `<section class="job-ahp-card">
+    <div class="job-ahp-head"><div><span class="eyebrow">AHP · SELECTED JOB</span><h3>AHP 岗位实时权重</h3></div><span>Σw = ${sum.toFixed(3)}</span></div>
+    <p>${escapeHtml(profile.jobTitle || '当前岗位')} · 在全局 AHP 基准上按岗位特征实时调整</p>
+    <div class="job-ahp-weights">${chips}</div>
+    ${reasons ? `<ul>${reasons}</ul>` : ''}
+  </section>`;
+}
+
 function updateAgentMatchNote() {
   const node = $('#agent-match-note');
   if (!node) return;
@@ -850,7 +1289,8 @@ function updateAgentMatchNote() {
   } else if (state.agentError) {
     node.textContent = state.agentError;
   } else if (state.agentMatches.size) {
-    node.textContent = `Agent 已精排 ${state.agentMatches.size} 个岗位 · 最终分 = Agent 70% + 规则 30%`;
+    const active = [...state.agentMatches.values()].filter(item => item.scoreSource === 'AGENT').length;
+    node.textContent = `Agent 已为 ${active} 个岗位生成受限权重 · 最终分由确定性规则引擎计算`;
   } else {
     node.textContent = '匹配度由 Agent 读取岗位职责和任职要求动态计算；Agent 不可用时自动使用规则分。';
   }
@@ -871,7 +1311,8 @@ async function loadAgentScores(recommendationId=state.recommendationRequestId) {
     const result = await post('/api/jobs/recommend/agent', { resumeId, jobIds });
     if (recommendationId !== state.recommendationRequestId) return;
     const items = result?.items || [];
-    if (!result?.available || !items.length) {
+    const activeItems = items.filter(item => item.scoreSource === 'AGENT');
+    if (!result?.available || !activeItems.length) {
       state.agentError = 'Agent 暂不可用，当前显示规则分；岗位详情仍可正常查看。';
       return;
     }
@@ -888,6 +1329,10 @@ async function loadAgentScores(recommendationId=state.recommendationRequestId) {
   }
 }
 async function reloadJobs() {
+  if (state.cityMode || $('#job-city-filter')?.value) {
+    await loadCityJobs(true);
+    return;
+  }
   state.recommendations = [];
   try { await loadRecommendations(); }
   catch (error) { toast('岗位筛选失败', error.message, true); }
@@ -896,6 +1341,7 @@ async function reloadJobs() {
 async function renderJobs() {
   const target = $('#job-list');
   if (!target) return;
+  if (state.cityMode) { renderCityJobs(); return; }
   if (!state.recommendations.length) {
     try { await loadRecommendations(); }
     catch (error) { toast('岗位匹配失败', error.message, true); }
@@ -909,7 +1355,8 @@ async function renderJobs() {
     return (!keyword || haystack.includes(keyword)) && (!city || job.city === city);
   });
   const scored = items.map(item => {
-    const agent = agentMatchForJob(item.job.id);
+    const agentCandidate = agentMatchForJob(item.job.id);
+    const agent = agentCandidate?.scoreSource === 'AGENT' ? agentCandidate : null;
     return { item, agent, score: agent?.finalScore ?? item.matchScore };
   });
   if (sort === 'match') scored.sort((a,b) => b.score - a.score);
@@ -936,15 +1383,18 @@ async function renderJobs() {
     const ruleBreakdown = (item.scoreBreakdown || []).filter(component => component.weight > 0).map(component =>
       `<span title="${escapeHtml(component.detail || '')}">${escapeHtml(component.label)} <b>${component.contribution}</b></span>`
     ).join('');
+    const agentWeightBreakdown = (agent?.scoreBreakdown || []).filter(component => component.weight > 0).map(component =>
+      `<span title="${escapeHtml(component.detail || '')}">${escapeHtml(component.label)} 权重 ${Math.round(component.weight)}% · ${component.contribution}</span>`
+    ).join('');
     const breakdown = agent
-      ? `<span class="score-breakdown-label">Agent 逐条判断</span>${agentBreakdown}`
+      ? `<span class="score-breakdown-label">Agent 受限权重</span>${agentWeightBreakdown}<span class="score-breakdown-label">逐条证据</span>${agentBreakdown}`
       : `<span class="score-breakdown-label">规则分构成</span>${ruleBreakdown || '<span>暂无拆解</span>'}`;
     const reasons = agent
       ? [`Agent：${agent.reason || '已完成岗位要求匹配'}`, ...(item.reasons || []).slice(0,2)]
       : (item.reasons || []);
     const level = agent?.verdict || item.matchLevel || scoreLevel(score);
     return `<article class="panel job-card" data-job="${job.id}">
-      <div class="job-card-head"><div class="job-company"><div class="company-logo">${escapeHtml(String(job.company || '岗').slice(0,1))}</div><div><h3>${escapeHtml(job.title)}</h3><p>${escapeHtml(job.company)} · ${escapeHtml(job.experience || '经验不限')}</p></div></div><div class="match-badge"><span class="score-source ${agent?'agent':'rule'}">${agent?'AGENT':'RULE'}</span><strong>${score}%</strong><span>${escapeHtml(level)}</span></div></div>
+      <div class="job-card-head"><div class="job-company"><div class="company-logo">${escapeHtml(String(job.company || '岗').slice(0,1))}</div><div><h3>${escapeHtml(job.title)}</h3><p>${escapeHtml(job.company)} · ${escapeHtml(job.experience || '经验不限')}</p></div></div><div class="match-badge"><span class="score-source ${agent?'agent':'rule'}">${agent?'AGENT适配':'规则参考'}</span><strong>${score}%</strong><span>${escapeHtml(level)}</span></div></div>
       <div class="job-meta"><span class="salary">${escapeHtml(job.salary || '薪资面议')}</span><span>${escapeHtml(job.city)}</span><span>${escapeHtml(job.education || '学历不限')}</span></div>
       <div class="job-skills">${skills}</div>
       <div class="job-requirement-preview">
@@ -961,21 +1411,25 @@ async function renderJobs() {
 async function openJobModal(jobId) {
   const job = jobById(jobId) || await api(`/api/jobs/${jobId}`);
   if (!job) return;
+  const jobAhpProfile = await loadJobAhpProfile(job.id);
+  const jobAhpPanel = renderJobAhpPanel(jobAhpProfile);
   const rec = recommendationForJob(job.id);
-  const agent = agentMatchForJob(job.id);
+  const agentCandidate = agentMatchForJob(job.id);
+  const agent = agentCandidate?.scoreSource === 'AGENT' ? agentCandidate : null;
   const scorePanel = agent
     ? `<section class="agent-score-panel">
-        <div class="agent-score-head"><div><span class="eyebrow">AGENT MATCH REVIEW</span><h3>Agent 匹配结论</h3></div><div class="agent-score-numbers"><div><strong>${agent.finalScore}</strong><span>最终分</span></div><div><strong>${agent.agentScore}</strong><span>Agent 分</span></div><div><strong>${agent.ruleScore}</strong><span>规则分</span></div></div></div>
+        <div class="agent-score-head"><div><span class="eyebrow">AGENT MATCH REVIEW</span><h3>Agent 受限调权结论</h3></div><div class="agent-score-numbers"><div><strong>${agent.finalScore}</strong><span>岗位适配度</span></div><div><strong>${agent.agentScore}</strong><span>调权结果</span></div><div><strong>${agent.ruleScore}</strong><span>默认规则</span></div></div></div>
         <p class="agent-verdict">${escapeHtml(agent.verdict || scoreLevel(agent.finalScore))} · ${escapeHtml(agent.reason || '')}</p>
         <div class="agent-breakdown-list">${(agent.breakdown || []).map(row => {
           const tone = row.status === '满足' ? 'met' : row.status === '部分满足' ? 'partial' : 'miss';
           return `<div class="agent-breakdown-item ${tone}"><div><b>${escapeHtml(row.importance || '要求')}</b><span>${escapeHtml(row.requirement || '')}</span><em>${escapeHtml(row.status || '')}</em></div><small>${escapeHtml(row.evidence || '暂无简历证据')}</small></div>`;
         }).join('')}</div>
-        <div class="agent-score-formula">最终分 ${agent.finalScore} = Agent ${agent.agentScore} × 70% + 规则 ${agent.ruleScore} × 30%</div>
+        <div class="agent-score-formula">岗位适配度 = Σ（维度因子 × Agent 受限权重）；Agent 不直接输出分数。${(agent.scoreBreakdown || []).filter(component => component.weight > 0).map(component => `${escapeHtml(component.label)} ${Math.round(component.weight)}%`).join(' · ')}</div>
       </section>`
     : `<section class="agent-score-panel fallback"><div class="agent-score-head"><div><span class="eyebrow">SCORE SOURCE</span><h3>当前使用规则兜底分</h3></div>${rec ? `<div class="agent-score-numbers"><div><strong>${rec.matchScore}</strong><span>规则分</span></div></div>` : ''}</div><p class="agent-verdict">${state.agentLoading ? 'Agent 正在分析该批次岗位，完成后会显示逐条要求与证据。' : 'Agent 暂不可用。规则分仅用于召回和兜底，不代表模型已经完成逐条判断。'}</p></section>`;
   $('#job-modal-content').innerHTML = `<span class="eyebrow">JOB DETAIL · VERIFIED JOB DATA</span><h2>${escapeHtml(job.title)}</h2><div class="modal-company">${escapeHtml(job.company)} · ${escapeHtml(job.city)} · ${escapeHtml(job.source || '')}</div>
     <div class="job-detail-grid"><div><span>薪资范围</span><strong>${escapeHtml(job.salary || '面议')}</strong></div><div><span>学历/经验</span><strong>${escapeHtml(job.education || '不限')} / ${escapeHtml(job.experience || '不限')}</strong></div></div>
+    ${jobAhpPanel}
     ${scorePanel}
     <h3>技术需求</h3><div class="job-skills">${(job.skills||[]).map(skill => {
       const key = String(skill).toLowerCase().replace(/\./g,'').replace(/\s/g,'');
@@ -1001,6 +1455,13 @@ async function openJobModal(jobId) {
 function closeJobModal() { $('#job-modal').classList.remove('open'); $('#job-modal').setAttribute('aria-hidden','true'); }
 async function refreshJobs() {
   try {
+    if (state.cityMode) {
+      state.cityFacets = await api('/api/jobs/cities').catch(() => state.cityFacets);
+      populateAllSelects();
+      await loadCityJobs(true);
+      toast('城市岗位已刷新', `当前城市共 ${state.cityTotal} 个岗位`);
+      return;
+    }
     await api('/api/jobs/refresh?limit=30', { method:'POST' });
     const [jobs] = await Promise.all([api('/api/jobs'), loadRecommendations()]);
     state.jobs = jobs; populateAllSelects(); renderJobs(); toast('岗位源已刷新','已同步 MCP 岗位并重新计算匹配');
@@ -1068,17 +1529,26 @@ function renderDiagnosis(report) {
   target.className = 'panel'; state.diagnosis = report;
   const qualityScore = report.resumeQualityScore ?? report.overallScore;
   const matchScore = report.jobMatchScore ?? null;
+  const ruleScore = report.ruleMatchScore ?? null;
+  const agentScore = report.agentMatchScore ?? null;
+  const source = report.jobMatchSource === 'AGENT' ? 'AGENT' : (matchScore == null ? null : 'RULE_FALLBACK');
+  const sourceLabel = source === 'AGENT' ? 'Agent 受限调权' : source === 'RULE_FALLBACK' ? '规则分兜底' : '未选择岗位';
   const dimensions = (report.dimensions || []).map(item => `<div class="dimension"><div><span>${escapeHtml(item.name)} <small style="color:#9aaba7">${item.weight}%</small></span><strong>${item.score}</strong></div><div class="dimension-track"><i style="width:${item.score}%"></i></div><p style="font-size:9px;color:#899a96;margin:4px 0 0">${escapeHtml(item.comment)}</p></div>`).join('');
   const suggestions = (report.suggestions || []).map(item => `<div class="suggestion ${item.priority.toLowerCase()}"><div class="priority">${escapeHtml(item.priority)}</div><div><h4>${escapeHtml(item.category)} · ${escapeHtml(item.issue)}</h4><p>${escapeHtml(item.action)}</p><span class="example">示例：${escapeHtml(item.example)}</span></div></div>`).join('');
   const matched = (report.matchedKeywords || []).map(item => `<span>✓ ${escapeHtml(item)}</span>`).join('');
   const missing = (report.missingKeywords || []).map(item => `<span class="missing">! ${escapeHtml(item)}</span>`).join('');
-  const formula = matchScore === null ? '未选择具体岗位，综合分等于简历质量分' : `综合 ${report.overallScore} = 岗位匹配 ${matchScore} × 60% + 简历质量 ${qualityScore} × 40%`;
+  const formula = matchScore === null ? '未选择具体岗位，综合分等于简历质量分' : `综合竞争力 ${report.overallScore} = 岗位适配度 ${matchScore} × 60% + 简历质量 ${qualityScore} × 40%`;
   const qualityFocus = [...(report.dimensions || [])].sort((a,b) => a.score - b.score).slice(0,3).map(item => `<div class="explain-item"><span>${escapeHtml(item.name)}</span><strong>${item.score}</strong><small>${escapeHtml(item.comment)}</small></div>`).join('');
-  const matchFocus = (report.jobMatchBreakdown || []).filter(item => item.weight > 0).sort((a,b) => a.factor - b.factor).slice(0,3).map(item => `<div class="explain-item"><span>${escapeHtml(item.label)}</span><strong>${item.contribution}</strong><small>权重 ${Math.round(item.weight)}% · ${escapeHtml(item.detail || '')}</small></div>`).join('');
-  const breakdown = (report.jobMatchBreakdown || []).filter(item => item.weight > 0).map(item => `<span title="${escapeHtml(item.detail || '')}">${escapeHtml(item.label)} <b>${item.contribution}</b></span>`).join('');
-  target.innerHTML = `<div class="report-head"><div class="diagnosis-score-stack"><div class="big-score-ring" style="--score:${report.overallScore}"><div><strong>${report.overallScore}</strong><span>综合竞争力</span></div></div><div class="score-split"><div><strong>${qualityScore}</strong><span>简历质量</span></div><div><strong>${matchScore ?? '--'}</strong><span>岗位匹配</span><small>${escapeHtml(report.jobMatchLevel || '未选择岗位')}</small></div></div></div><div class="report-overview"><div class="report-title"><h2>${escapeHtml(report.targetRole)}</h2><span class="report-level">${escapeHtml(report.level)}</span></div><p class="report-summary">${escapeHtml(report.summary)}</p><div class="score-formula">${escapeHtml(formula)}</div>${breakdown ? `<div class="score-breakdown">${breakdown}</div>` : ''}<div class="keyword-row">${matched}${missing}</div><div class="strength-row">${(report.strengths || []).map(item => `<span>✦ ${escapeHtml(item)}</span>`).join('')}</div></div></div><div class="score-explain"><div class="explain-head"><span class="eyebrow">WHY THIS SCORE</span><h3>为什么是这个分数</h3></div><div class="explain-grid"><div><h4>简历质量主要失分项</h4>${qualityFocus}</div><div><h4>岗位匹配主要影响因素</h4>${matchFocus || '<p class="explain-empty">未选择岗位或岗位数据不足</p>'}</div></div></div><div class="report-body"><div class="dimension-block"><span class="eyebrow">RESUME QUALITY</span><h3>简历质量维度</h3><div class="dimension-list">${dimensions}</div></div><div class="suggestion-block"><span class="eyebrow">ACTION PRIORITY</span><h3>修改行动清单</h3><div class="suggestion-list">${suggestions}</div></div></div>` + renderLearningPlanBlock(report) + renderAgentTraceBlock(report);
+  const agentEvidence = (report.agentMatchBreakdown || []).slice(0,6).map(item => {
+    const tone = item.status === '满足' ? 'met' : item.status === '部分满足' ? 'partial' : 'miss';
+    return `<div class="explain-item agent-evidence ${tone}"><span>${escapeHtml(item.importance || '要求')} · ${escapeHtml(item.requirement || '')}</span><strong>${escapeHtml(item.status || '')}</strong><small>${escapeHtml(item.evidence || '暂无简历证据')}</small></div>`;
+  }).join('');
+  const ruleFocus = (report.jobMatchBreakdown || []).filter(item => item.weight > 0).sort((a,b) => a.factor - b.factor).slice(0,3).map(item => `<div class="explain-item"><span>${escapeHtml(item.label)}</span><strong>${item.contribution}</strong><small>权重 ${Math.round(item.weight)}% · ${escapeHtml(item.detail || '')}</small></div>`).join('');
+  const matchFocus = agentEvidence || ruleFocus;
+  const ruleBreakdown = (report.jobMatchBreakdown || []).filter(item => item.weight > 0).map(item => `<span title="${escapeHtml(item.detail || '')}">${escapeHtml(item.label)} <b>${item.contribution}</b></span>`).join('');
+  const scoreSources = matchScore === null ? '' : `<div class="diagnosis-source-row"><span class="match-source ${source === 'AGENT' ? 'agent' : 'rule'}">${escapeHtml(sourceLabel)}</span><span>岗位适配度 <b>${matchScore}</b></span><span>默认规则 <b>${ruleScore ?? '--'}</b></span><span>Agent 调权结果 <b>${agentScore ?? '--'}</b></span></div>`;
+  target.innerHTML = `<div class="report-head"><div class="diagnosis-score-stack"><div class="big-score-ring" style="--score:${report.overallScore}"><div><strong>${report.overallScore}</strong><span>综合竞争力</span></div></div><div class="score-split"><div><strong>${qualityScore}</strong><span>简历质量</span></div><div><strong>${matchScore ?? '--'}</strong><span>岗位适配度</span><small>${escapeHtml(report.jobMatchLevel || '未选择岗位')}</small></div></div></div><div class="report-overview"><div class="report-title"><h2>${escapeHtml(report.targetRole)}</h2><span class="report-level">${escapeHtml(report.level)}</span></div><p class="report-summary">${escapeHtml(report.summary)}</p><div class="score-formula">${escapeHtml(formula)}</div>${scoreSources}${ruleBreakdown ? `<div class="score-breakdown"><span class="score-breakdown-label">${source === 'AGENT' ? 'Agent 受限调权明细' : '规则基线明细'}</span>${ruleBreakdown}</div>` : ''}<div class="keyword-row">${matched}${missing}</div><div class="strength-row">${(report.strengths || []).map(item => `<span>✦ ${escapeHtml(item)}</span>`).join('')}</div></div></div><div class="score-explain"><div class="explain-head"><span class="eyebrow">WHY THIS SCORE</span><h3>为什么是这个分数</h3></div><div class="explain-grid"><div><h4>简历质量主要失分项</h4>${qualityFocus}</div><div><h4>岗位适配依据</h4>${matchFocus || '<p class="explain-empty">未选择岗位或岗位数据不足</p>'}</div></div></div><div class="report-body"><div class="dimension-block"><span class="eyebrow">RESUME QUALITY</span><h3>简历质量维度</h3><div class="dimension-list">${dimensions}</div></div><div class="suggestion-block"><span class="eyebrow">ACTION PRIORITY</span><h3>修改行动清单</h3><div class="suggestion-list">${suggestions}</div></div></div>` + renderLearningPlanBlock(report) + renderAgentTraceBlock(report);
 }
-
 /* job recommendation agent */
 async function runJobAgent() {
   const resumeId = Number($('#diagnosis-resume').value || state.activeResumeId);
@@ -1209,10 +1679,26 @@ $('#add-custom-skill').addEventListener('click', addCustomSkill);
 $('#custom-skill-input').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); addCustomSkill(); } });
 $('#new-resume').addEventListener('click', emptyResume);
 $('#save-resume').addEventListener('click', event => { event.preventDefault(); saveResume(); });
+$('#export-resume-pdf').addEventListener('click', event => { event.preventDefault(); exportCurrentResumePdf(); });
+$('#library-new-resume').addEventListener('click', () => { emptyResume(); navigate('resume'); });
+$('#library-refresh').addEventListener('click', refreshResumeLibrary);
+$('#library-search').addEventListener('input', renderResumeLibrary);
+$('#library-sort').addEventListener('change', renderResumeLibrary);
+$('#resume-library-grid').addEventListener('click', event => {
+  const action = event.target.closest('[data-library-action]');
+  if (!action) return;
+  const kind = action.dataset.libraryAction;
+  if (kind === 'new') { emptyResume(); navigate('resume'); }
+  else if (kind === 'clear') { const search = $('#library-search'); if (search) search.value = ''; renderResumeLibrary(); }
+  else if (kind === 'edit') openResumeFromLibrary(Number(action.dataset.resumeId));
+  else if (kind === 'pdf') downloadResumePdf(Number(action.dataset.resumeId));
+});
 $('#save-version').addEventListener('click', event => { event.preventDefault(); saveVersion(); });
 $('#open-guidance').addEventListener('click', event => { event.preventDefault(); openGuidance(); });
 $('#open-ats').addEventListener('click', event => { event.preventDefault(); openAts(); });
 $('#ats-modal').addEventListener('click', event => { if (event.target.closest('[data-close-ats]') || event.target.id === 'ats-modal') closeAts(); });
+$('#verify-java-skill').addEventListener('click', event => { event.preventDefault(); openJavaSkillTest(); });
+$('#skill-test-modal').addEventListener('click', event => { if (event.target.closest('[data-close-skill-test]') || event.target.id === 'skill-test-modal') closeJavaSkillTest(); });
 $('#guidance-modal').addEventListener('click', event => {
   if (event.target.closest('[data-close-guidance]') || event.target.id === 'guidance-modal') closeGuidance();
 });
@@ -1231,17 +1717,30 @@ $('#education-proof-file').addEventListener('change', event => {
 });
 window.addEventListener('resize', () => requestAnimationFrame(fitResumePreview));$('#refresh-btn').addEventListener('click', async () => { try { await refreshDashboard(); renderJobs(); toast('数据已刷新','总览数据已同步'); } catch (error) { toast('刷新失败',error.message,true); } });
 $('#refresh-jobs').addEventListener('click', refreshJobs);
-$('#job-keyword').addEventListener('input', renderJobs);
-$('#job-city-filter').addEventListener('change', renderJobs);
+$('#job-keyword').addEventListener('input', () => {
+  if (state.cityMode) {
+    clearTimeout(state.citySearchTimer);
+    state.citySearchTimer = setTimeout(() => loadCityJobs(true), 350);
+  } else renderJobs();
+});
+$('#job-city-filter').addEventListener('change', () => {
+  const city = $('#job-city-filter')?.value || '';
+  if (city) { setCityMode(true); loadCityJobs(true); }
+  else { setCityMode(false); state.cityJobs = []; state.cityTotal = 0; state.recommendations = []; reloadJobs(); }
+});
 ['#job-category-filter','#job-experience-filter','#job-education-filter','#job-salary-filter']
   .forEach(sel => document.querySelector(sel)?.addEventListener('change', reloadJobs));
 $('#job-keyword').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); reloadJobs(); } });
-$('#job-sort').addEventListener('change', renderJobs);
+$('#job-sort').addEventListener('change', () => state.cityMode ? loadCityJobs(true) : renderJobs());
 $('#add-excluded-city').addEventListener('click', addExcludedCity);
 $('#excluded-city-input').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); addExcludedCity(); } });
 $('#excluded-city-chips').addEventListener('click', event => {
   const button = event.target.closest('[data-remove-excluded-city]');
   if (button) removeExcludedCity(Number(button.dataset.removeExcludedCity));
+});
+$('#job-list').addEventListener('click', event => {
+  const more = event.target.closest('[data-city-action="more"]');
+  if (more) loadCityJobs(false);
 });
 $('#start-interview').addEventListener('click', () => startInterview());
 $('#send-answer').addEventListener('click', sendInterviewAnswer);

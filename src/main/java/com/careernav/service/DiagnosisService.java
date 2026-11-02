@@ -77,7 +77,9 @@ public class DiagnosisService {
                 base.overallScore(), base.resumeQualityScore(), base.jobMatchScore(), base.jobMatchLevel(),
                 base.level(), summary, base.dimensions(), base.jobMatchBreakdown(), strengths,
                 base.matchedKeywords(), base.missingKeywords(), suggestions,
-                enrichment.toolCalls(), base.learningPlan(), base.resumeUpdatedAt(), base.createdAt());
+                enrichment.toolCalls(), base.learningPlan(),
+                base.jobMatchSource(), base.ruleMatchScore(), base.agentMatchScore(), base.agentMatchBreakdown(),
+                base.resumeUpdatedAt(), base.createdAt());
 
         repository.findById(base.id()).ifPresent(entity -> {
             entity.setReportJson(jsonCodec.write(enriched));
@@ -101,6 +103,7 @@ public class DiagnosisService {
         ResumeView resume = resumeService.get(resumeId);
         JobView job = jobId == null ? null : jobService.get(jobId);
         JobRecommendation jobMatch = jobId == null ? null : jobService.evaluate(resume, jobId);
+        AgentMatchItem targetMatch = jobId == null ? null : jobService.targetMatch(resume, jobId);
         String targetRole = job == null ? resume.targetRole() : job.title();
 
         int completeness = completeness(resume);
@@ -115,21 +118,32 @@ public class DiagnosisService {
                 new DiagnosisDimension("成果量化", achievement, 20, achievement >= 75 ? "项目成果有明确指标" : "缺少可验证的规模、性能或业务结果"),
                 new DiagnosisDimension("技术深度", depth, 15, depth >= 75 ? "技能与项目能够相互支撑" : "技能数量较多，但项目证据不足"),
                 new DiagnosisDimension("表达与ATS", expression, 20, expression >= 75 ? "关键词与行动表达较清晰" : "关键词密度或行动表达仍有提升空间"),
-                new DiagnosisDimension("教育基础", education, 10, "学历、学校与专业背景"),
+                new DiagnosisDimension("教育基础与真实性", education, 10,
+                        resume.educationVerified() ? "学历、学校、专业背景及材料真实性均已核验"
+                                : "学历材料未通过或尚未完成真实性核验，按不合格学历处理"),
                 new DiagnosisDimension("项目可信度", credibility, 15, credibility >= 75 ? "项目与成果能够验证技能" : "项目或实习证据不足")
         );
         int resumeQualityScore = weightedScore(qualityDimensions);
-        Integer jobMatchScore = jobMatch == null ? null : jobMatch.matchScore();
-        int overallScore = jobMatchScore == null ? resumeQualityScore : (int) Math.round(jobMatchScore * 0.6 + resumeQualityScore * 0.4);
+        Integer jobMatchScore = targetMatch == null ? null : targetMatch.finalScore();
+        Integer ruleMatchScore = targetMatch == null ? null : targetMatch.ruleScore();
+        Integer agentMatchScore = targetMatch == null ? null : targetMatch.agentScore();
+        String jobMatchSource = targetMatch == null ? null : targetMatch.scoreSource();
+        List<MatchBreakdown> agentMatchBreakdown = targetMatch == null ? List.of() : targetMatch.breakdown();
+        List<MatchScoreComponent> effectiveMatchBreakdown = targetMatch != null
+                && targetMatch.scoreBreakdown() != null && !targetMatch.scoreBreakdown().isEmpty()
+                ? targetMatch.scoreBreakdown()
+                : (jobMatch == null ? List.of() : jobMatch.scoreBreakdown());
+        int overallScore = jobMatchScore == null ? resumeQualityScore
+                : (int) Math.round(jobMatchScore * 0.6 + resumeQualityScore * 0.4);
         String level = level(overallScore);
-        String summary = buildSummary(targetRole, resumeQualityScore, jobMatch, qualityDimensions);
+        String summary = buildSummary(targetRole, resumeQualityScore, jobMatch, targetMatch, qualityDimensions);
 
         Set<String> matched = jobMatch == null ? Set.of() : new LinkedHashSet<>(jobMatch.matchedSkills());
         Set<String> missing = jobMatch == null ? Set.of() : new LinkedHashSet<>(jobMatch.missingSkills());
         // buildStrengths() returns an immutable list (Stream.toList()); the Agent enrichment
         // below appends to it, so wrap it in a mutable list first.
-        List<String> strengths = new ArrayList<>(buildStrengths(qualityDimensions, jobMatch));
-        List<DiagnosisSuggestion> suggestions = new ArrayList<>(buildSuggestions(resume, qualityDimensions, matched, missing, jobMatch));
+        List<String> strengths = new ArrayList<>(buildStrengths(qualityDimensions, jobMatch, targetMatch));
+        List<DiagnosisSuggestion> suggestions = new ArrayList<>(buildSuggestions(resume, qualityDimensions, matched, missing, jobMatch, targetMatch));
 
         LearningPath learningPlan = learningPathService.generate(resumeId, targetRole);
 
@@ -149,9 +163,11 @@ public class DiagnosisService {
         }
 
         DiagnosisReport draft = new DiagnosisReport(null, resume.id(), jobId, targetRole, overallScore,
-                resumeQualityScore, jobMatchScore, jobMatch == null ? "未选择岗位" : jobMatch.matchLevel(), level, summary,
-                qualityDimensions, jobMatch == null ? List.of() : jobMatch.scoreBreakdown(), strengths,
+                resumeQualityScore, jobMatchScore,
+                targetMatch == null ? "未选择岗位" : targetMatch.verdict(), level, summary,
+                qualityDimensions, effectiveMatchBreakdown, strengths,
                 List.copyOf(matched), List.copyOf(missing), suggestions, List.of(), learningPlan,
+                jobMatchSource, ruleMatchScore, agentMatchScore, agentMatchBreakdown,
                 resume.updatedAt(), LocalDateTime.now());
         if (!persist) return draft;
 
@@ -170,6 +186,7 @@ public class DiagnosisService {
                 draft.overallScore(), draft.resumeQualityScore(), draft.jobMatchScore(), draft.jobMatchLevel(),
                 draft.level(), draft.summary(), draft.dimensions(), draft.jobMatchBreakdown(), draft.strengths(),
                 draft.matchedKeywords(), draft.missingKeywords(), draft.suggestions(), draft.agentTrace(), draft.learningPlan(),
+                draft.jobMatchSource(), draft.ruleMatchScore(), draft.agentMatchScore(), draft.agentMatchBreakdown(),
                 draft.resumeUpdatedAt(), draft.createdAt());
         entity.setReportJson(jsonCodec.write(report));
         repository.save(entity);
@@ -244,7 +261,13 @@ public class DiagnosisService {
         int projectScore = Math.min(25, safe(resume.projects()).size() * 15);
         long highlighted = safe(resume.projects()).stream().filter(item -> nonBlank(item.highlight())).count();
         int highlightScore = Math.min(20, (int) highlighted * 10);
-        return Math.min(100, 20 + skillScore + projectScore + highlightScore);
+        int testAdjustment = 0;
+        for (var proficiency : safe(resume.skillProficiencies())) {
+            if (proficiency == null || proficiency.score() == null) continue;
+            if (proficiency.score() < 45) testAdjustment -= 20;
+            else if (proficiency.score() >= 80) testAdjustment += 4;
+        }
+        return Math.max(20, Math.min(100, 20 + skillScore + projectScore + highlightScore + testAdjustment));
     }
 
     private int expression(ResumeView resume, Set<String> matched) {
@@ -258,6 +281,9 @@ public class DiagnosisService {
     }
 
     private int education(ResumeView resume, JobView job) {
+        if (!resume.educationVerified()) {
+            return "MISMATCH".equals(resume.educationVerificationStatus()) ? 10 : 25;
+        }
         int score = 65;
         if (nonBlank(resume.education())) score += 12;
         if (nonBlank(resume.school())) score += 10;
@@ -274,23 +300,28 @@ public class DiagnosisService {
         return Math.min(100, score);
     }
 
-    private String buildSummary(String targetRole, int qualityScore, JobRecommendation match, List<DiagnosisDimension> dimensions) {
+    private String buildSummary(String targetRole, int qualityScore, JobRecommendation ruleMatch,
+                                AgentMatchItem targetMatch, List<DiagnosisDimension> dimensions) {
         String focus = dimensions.stream().sorted(Comparator.comparingInt(DiagnosisDimension::score))
                 .limit(3).map(DiagnosisDimension::name).collect(Collectors.joining("、"));
-        if (match == null) return String.format("简历质量得分 %d 分。主要受影响维度是%s。当前未选择具体岗位，因此不计算岗位匹配分。", qualityScore, focus);
-        String matchFocus = match.scoreBreakdown().stream().filter(item -> item.weight() > 0)
-                .sorted(Comparator.comparingDouble(MatchScoreComponent::factor)).limit(3)
-                .map(MatchScoreComponent::label).collect(Collectors.joining("、"));
-        int overall = (int) Math.round(match.matchScore() * 0.6 + qualityScore * 0.4);
-        return String.format("综合分 %d = 岗位匹配 %d × 60%% + 简历质量 %d × 40%%。简历质量主要失分在%s；与“%s”的岗位匹配主要受%s影响。",
-                overall, match.matchScore(), qualityScore, focus, targetRole, matchFocus.isBlank() ? "岗位整体要求" : matchFocus);
+        if (targetMatch == null) {
+            return String.format("简历质量得分 %d 分。主要受影响维度是%s。当前未选择具体岗位，因此不计算岗位适配度。", qualityScore, focus);
+        }
+        int overall = (int) Math.round(targetMatch.finalScore() * 0.6 + qualityScore * 0.4);
+        String source = "AGENT".equalsIgnoreCase(targetMatch.scoreSource()) ? "Agent 逐条判断" : "规则兜底";
+        String gap = targetMatch.reason() == null || targetMatch.reason().isBlank()
+                ? "岗位整体要求" : targetMatch.reason();
+        return String.format("岗位适配度 %d 分（来源：%s），规则基线 %d 分；简历质量 %d 分；综合竞争力 %d = 岗位适配度 × 60%% + 简历质量 × 40%%。主要差距：%s",
+                targetMatch.finalScore(), source, targetMatch.ruleScore(), qualityScore, overall, gap);
     }
 
-    private List<String> buildStrengths(List<DiagnosisDimension> dimensions, JobRecommendation match) {
+    private List<String> buildStrengths(List<DiagnosisDimension> dimensions, JobRecommendation match,
+                                        AgentMatchItem targetMatch) {
         List<String> values = new ArrayList<>();
         dimensions.stream().filter(item -> item.score() >= 80).forEach(item -> values.add(item.name() + "表现较好：" + item.comment()));
         if (match != null) {
-            if (match.matchScore() >= 75) values.add("岗位匹配度较高：" + match.matchLevel());
+            int unifiedScore = targetMatch == null ? match.matchScore() : targetMatch.finalScore();
+            if (unifiedScore >= 75) values.add("岗位适配度较高：" + (targetMatch == null ? match.matchLevel() : targetMatch.verdict()));
             if (!match.matchedSkills().isEmpty()) values.add("已覆盖岗位关键词：" + String.join("、", match.matchedSkills()));
         }
         if (values.isEmpty()) values.add("简历已有基础信息，建议先补齐项目证据和量化成果");
@@ -298,13 +329,26 @@ public class DiagnosisService {
     }
 
     private List<DiagnosisSuggestion> buildSuggestions(ResumeView resume, List<DiagnosisDimension> dimensions,
-                                                       Set<String> matched, Set<String> missing, JobRecommendation match) {
+                                                       Set<String> matched, Set<String> missing, JobRecommendation match,
+                                                       AgentMatchItem targetMatch) {
         List<DiagnosisSuggestion> values = new ArrayList<>();
         int credibility = dimensionScore(dimensions, "项目可信度");
         int achievement = dimensionScore(dimensions, "成果量化");
         int depth = dimensionScore(dimensions, "技术深度");
         int expression = dimensionScore(dimensions, "表达与ATS");
 
+        safe(resume.skillProficiencies()).stream()
+                .filter(item -> item != null && item.score() != null && item.score() < 45)
+                .findFirst().ifPresent(item -> values.add(new DiagnosisSuggestion("P0", "技能验证",
+                        item.skill() + " 水平测试仅 " + item.score() + " 分，未达到简历声称的掌握程度",
+                        "先补齐该技能的基础知识并重新测试；测试通过前不要把熟练或精通写进简历",
+                        "针对薄弱主题完成专项练习，再重新进行限时水平验证")));
+        if (!resume.educationVerified()) {
+            values.add(new DiagnosisSuggestion("P0", "学历真实性",
+                    "学历材料尚未通过真实性核验，当前按不合格学历计分",
+                    "上传本人学信网在线验证报告并确保姓名、学校、学历、专业和毕业年份与简历一致",
+                    "先打开学信网下载报告，再回到简历工坊完成材料核验"));
+        }
         if (credibility < 75 || safe(resume.projects()).isEmpty()) {
             values.add(new DiagnosisSuggestion("P0", "项目证据", "项目或实习证据不足，技能无法被招聘方验证",
                     "补充 1-2 个真实项目，明确个人职责、技术难点和可验证结果", "使用 Spring Boot 完成后端服务，接口 P95 从 620ms 降至 180ms"));
@@ -325,9 +369,17 @@ public class DiagnosisService {
             values.add(new DiagnosisSuggestion("P0", "岗位关键词", "目标岗位缺少结构化技能关键词",
                     "只补充真实掌握的技能，并在项目中体现使用场景", "建议优先学习并验证：" + String.join("、", missing.stream().limit(4).toList())));
         }
-        if (match != null && match.matchScore() < 70) {
-            values.add(new DiagnosisSuggestion("P1", "岗位选择", "当前岗位只能作为尝试方向",
-                    "优先投递岗位方向和城市更匹配的岗位，再针对该岗位定制简历", "保留主简历，为后端、运维或数据方向分别生成版本"));
+        if (match != null) {
+            int unifiedScore = targetMatch == null ? match.matchScore() : targetMatch.finalScore();
+            if (unifiedScore < 55) {
+                values.add(new DiagnosisSuggestion("P0", "岗位选择", "Agent 判断当前岗位的核心硬性要求未满足",
+                        "先投递方向更匹配的岗位；如果坚持该岗位，需要补齐核心技能和真实项目证据",
+                        "保留 Java 后端主简历，另建目标方向版本，不把同一份简历投递到不同技术方向"));
+            } else if (unifiedScore < 70) {
+                values.add(new DiagnosisSuggestion("P1", "岗位选择", "当前岗位只能作为尝试方向",
+                        "优先投递岗位方向和城市更匹配的岗位，再针对该岗位定制简历",
+                        "保留主简历，为相近方向分别生成版本"));
+            }
         }
         values.add(new DiagnosisSuggestion("P2", "投递策略", "一份简历投递所有岗位会降低匹配效率",
                 "按岗位方向调整技能排序、项目侧重点和关键词", "针对 Java 后端突出 Spring Boot、MySQL、Redis；针对运维突出 Linux、Docker"));

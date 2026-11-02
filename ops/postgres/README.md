@@ -31,7 +31,7 @@ python .\ops\postgres\embedding_server.py
 ## 岗位数据
 
 - 表名：`jobs`
-- 岗位总数：4,110
+- 岗位总数：9,435（2026-10-22 查重导入后）
 - 向量不在 PostgreSQL 中存储
 - 向量写入 Qdrant collection：`careernav_jobs`
 - 向量维度：256
@@ -42,3 +42,29 @@ python .\ops\postgres\embedding_server.py
 ```text
 D:\何处是家乡\data\postgresql\models\tfidf_svd_256.joblib
 ```
+## 导入合并岗位数据
+
+数据文件：`data/imports/careernav_jobs_combined.csv`
+
+```powershell
+# 只查重，不写库
+python .\ops\import_combined_jobs.py --dry-run
+
+# 正式导入（只新增，不覆盖、不删除）
+python .\ops\import_combined_jobs.py
+```
+
+导入时会按 `external_id`、`content_hash` 和规范化后的“岗位名 + 公司 + 城市”查重。
+导入报告写入：`output/combined_jobs_import_report.json`。
+
+## 城市名称归一化
+
+导入的 Greenhouse 等数据可能包含英文城市，可执行：
+
+```powershell
+python .\ops\translate_job_cities.py
+```
+
+脚本会把 `Beijing`、`Shanghai`、`Hong Kong`、`Taipei`、`Hsinchu` 等统一为中文，
+同时修复多城市写法和 `location/search_text`。转化报告写入：
+`output/city_translation_report.json`。

@@ -2,8 +2,13 @@ package com.careernav.controller;
 
 import com.careernav.common.ApiResponse;
 import com.careernav.domain.ApiModels.*;
+import com.careernav.service.ResumePdfService;
 import com.careernav.service.ResumeService;
 import com.careernav.service.ResumeVersionService;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 
@@ -14,10 +19,12 @@ import java.util.List;
 public class ResumeController {
     private final ResumeService service;
     private final ResumeVersionService versions;
+    private final ResumePdfService pdfService;
 
-    public ResumeController(ResumeService service, ResumeVersionService versions) {
+    public ResumeController(ResumeService service, ResumeVersionService versions, ResumePdfService pdfService) {
         this.service = service;
         this.versions = versions;
+        this.pdfService = pdfService;
     }
 
     // ---------------------------------------------------------------- 简历
@@ -48,6 +55,24 @@ public class ResumeController {
     public ApiResponse<Void> delete(@PathVariable Long id) {
         service.delete(id);
         return ApiResponse.ok("简历已删除", null);
+    }
+
+    /** 导出当前已保存简历的 A4 PDF。PDF 由后端按结构化内容重新排版，不依赖浏览器截图。 */
+    @GetMapping("/{id}/pdf")
+    public ResponseEntity<byte[]> exportPdf(@PathVariable Long id) {
+        ResumeView resume = service.get(id);
+        byte[] pdf = pdfService.render(resume);
+        String filename = safeFilename("简历-" + resume.ownerName() + "-" + resume.targetRole() + ".pdf");
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        ContentDisposition.attachment().filename(filename, java.nio.charset.StandardCharsets.UTF_8).build().toString())
+                .contentType(MediaType.APPLICATION_PDF)
+                .body(pdf);
+    }
+
+    private String safeFilename(String value) {
+        String safe = value == null ? "简历.pdf" : value.replaceAll("[\\/:*?\"<>|]", "-").trim();
+        return safe.isBlank() ? "简历.pdf" : safe;
     }
 
     // ---------------------------------------------------------------- 版本管理
