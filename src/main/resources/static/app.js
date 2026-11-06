@@ -7,11 +7,11 @@ const state = {
   excludedCities: [], recommendationRequestId: 0, agentMatches: new Map(),
   agentLoading: false, agentError: '', cityFacets: [], cityMode: false,
   cityJobs: [], cityTotal: 0, cityPage: 0, cityLoading: false,
-  cityRequestId: 0, citySearchTimer: null, skillTest: null, skillTestTimer: null,
-  skillQuestionStartedAt: {}, skillRoundStartedAt: null,
-  ahpProfile: null
+  cityRequestId: 0, citySearchTimer: null, interviewEvidence: [], interviewEvidenceLoading: false,
+  ahpProfile: null, resumeImport: null, educationReport: null, projectQuestionSet: null, projectQuestionStatus: {},
+  projectQuestionDescription: '', projectAnswers: {}, projectFollowUps: {}, projectFollowUpLoading: {}
 };
-const pageTitles = { dashboard:'成长总览', resume:'简历工坊', library:'简历仓库', jobs:'岗位雷达', interview:'模拟面试', diagnosis:'简历诊断' };
+const pageTitles = { dashboard:'成长总览', resume:'简历工坊', library:'简历仓库', jobs:'岗位雷达', interview:'模拟面试', diagnosis:'简历诊断', 'project-questions':'项目面试助手' };
 const $ = (selector, root=document) => root.querySelector(selector);
 const $$ = (selector, root=document) => [...root.querySelectorAll(selector)];
 
@@ -57,6 +57,11 @@ function navigate(view) {
 }
 
 async function boot() {
+  if (new URLSearchParams(location.search).get('view') === 'project-questions') {
+    navigate('project-questions');
+    $('#sidebar-agent-mode').textContent = '项目考察已就绪';
+    return;
+  }
   try {
     const [resumes, jobs, dashboard, agentStatus, directions, cityFacets, ahpProfile] = await Promise.all([
       api('/api/resumes'), api('/api/jobs'), api('/api/dashboard'), api('/api/agent/status'),
@@ -107,8 +112,8 @@ function updateAgentStatus(status) {
 function populateAllSelects() {
   setOptions($('#interview-resume'), state.resumes, item => item.id, item => `${item.ownerName} · ${item.targetRole}`);
   setOptions($('#diagnosis-resume'), state.resumes, item => item.id, item => `${item.ownerName} · ${item.targetRole}`);
-  setOptions($('#interview-job'), state.jobs, item => item.id, item => `${item.title} · ${item.company}`);
-  setOptions($('#diagnosis-job'), state.jobs, item => item.id, item => `${item.title} · ${item.company}`, '不指定岗位');
+  setOptions($('#interview-job'), state.jobs, item => item.id, item => `${item.title} · ${item.company}`, '请选择目标岗位');
+  setOptions($('#diagnosis-job'), state.jobs, item => item.id, item => `${item.title} · ${item.company}`, '请选择目标岗位');
   const cityOptions = (state.cityFacets || []).length
     ? state.cityFacets
     : [...new Set(state.jobs.map(item => item.city).filter(Boolean))].map(city => ({ city, count: null }));
@@ -117,11 +122,70 @@ function populateAllSelects() {
     item => item.count == null ? item.city : `${item.city}（${item.count}）`,
     '全部城市');
   setOptions($('#job-category-filter'), state.directions || [], d => d, d => d, '全部方向');
-  if (state.activeResumeId) { $('#interview-resume').value = state.activeResumeId; $('#diagnosis-resume').value = state.activeResumeId; }
-  if (state.activeJobId) { $('#interview-job').value = state.activeJobId; $('#diagnosis-job').value = state.activeJobId; }
+  if (state.activeResumeId && [...$('#interview-resume').options].some(option => option.value === String(state.activeResumeId))) {
+    $('#interview-resume').value = String(state.activeResumeId);
+    $('#diagnosis-resume').value = String(state.activeResumeId);
+  }
+  if (state.activeJobId && [...$('#diagnosis-job').options].some(option => option.value === String(state.activeJobId))) {
+    $('#diagnosis-job').value = String(state.activeJobId);
+  }
 }
-function populateInterviewOptions() { populateAllSelects(); if (state.interview) renderInterview(state.interview); }
-function populateDiagnosisOptions() { populateAllSelects(); if (state.diagnosis) renderDiagnosis(state.diagnosis); if (state.jobAgent) renderJobAgent(state.jobAgent); }
+function hideInterviewDiagnosis() {
+  state.diagnosis = null;
+  const panel = $('#interview-diagnosis-panel');
+  const content = $('#interview-diagnosis-content');
+  if (panel) panel.hidden = true;
+  if (content) content.innerHTML = '';
+}
+function resetInterviewWorkspace(status='尚未开始') {
+  state.interview = null;
+  state.interviewEvidence = [];
+  hideInterviewDiagnosis();
+  const statusNode = $('#interview-status');
+  if (statusNode) { statusNode.textContent = status; statusNode.className = 'session-status'; }
+  const messages = $('#chat-messages');
+  if (messages) messages.innerHTML = '<div class="chat-empty"><div class="empty-orbit">AI</div><h3>选择岗位后开始面试</h3><p>五轮回答会形成面试证据，完成后解锁简历诊断。</p></div>';
+  if ($('#chat-job-title')) $('#chat-job-title').textContent = '等待选择目标岗位';
+  if ($('#round-text')) $('#round-text').textContent = '0 / 5';
+  if ($('#round-bar')) $('#round-bar').style.width = '0%';
+  if ($('#send-answer')) $('#send-answer').disabled = false;
+  if ($('#interview-answer')) $('#interview-answer').disabled = false;
+}
+function populateInterviewOptions() {
+  populateAllSelects();
+  if (state.interview) renderInterview(state.interview);
+  else resetInterviewWorkspace();
+  const resumeId = Number($('#interview-resume')?.value || state.activeResumeId);
+  const jobId = Number($('#interview-job')?.value || 0);
+  $('#interview-resume-label').textContent = resumeId ? interviewResumeLabel(resumeId) : '—';
+  $('#interview-job-label').textContent = jobId ? interviewJobLabel(jobId) : '请选择目标岗位';
+  renderInterviewJobFocus(jobId);
+}
+function renderDiagnosisLocked(message='请先完成对应岗位的模拟面试，面试前不会显示最终诊断内容。') {
+  const target = $('#diagnosis-content');
+  if (!target) return;
+  target.className = 'diagnosis-empty panel';
+  target.innerHTML = `<div class="diagnosis-lock-card"><span class="diagnosis-lock-icon">▣</span><h3>诊断内容已锁定</h3><p>${escapeHtml(message)}</p><button type="button" class="primary-button" data-go-diagnosis-interview>前往该岗位模拟面试</button></div>`;
+}
+function renderDiagnosisUnlocked(evidence) {
+  const target = $('#diagnosis-content');
+  if (!target) return;
+  const average = evidence.length
+    ? Math.round(evidence.reduce((sum, item) => sum + Number(item.score || 0), 0) / evidence.length)
+    : 0;
+  target.className = 'panel diagnosis-unlocked';
+  target.innerHTML = `<div class="diagnosis-unlock-card"><span class="diagnosis-lock-icon open">✓</span><div><span class="eyebrow">INTERVIEW EVIDENCE READY</span><h3>本岗位面试已完成</h3><p>已读取 ${evidence.length} 项技能证据，平均面试评分 ${average} 分。现在可以生成最终简历诊断。</p></div><button type="button" class="primary-button" data-run-page-diagnosis>生成简历诊断</button></div>`;
+}
+async function populateDiagnosisOptions() {
+  populateAllSelects();
+  const resumeId = Number($('#diagnosis-resume')?.value || state.activeResumeId);
+  const jobId = Number($('#diagnosis-job')?.value || 0);
+  if (!resumeId) { renderDiagnosisLocked('请先保存并选择一份简历。'); return; }
+  if (!jobId) { renderDiagnosisLocked('请选择目标岗位，并完成该岗位的模拟面试。'); return; }
+  const evidence = await loadInterviewEvidence(resumeId, jobId);
+  if (evidence.length) renderDiagnosisUnlocked(evidence);
+  else renderDiagnosisLocked('当前简历和岗位没有已完成面试。请先完成五轮模拟面试，再查看最终诊断。');
+}
 function restoreMatchPreferences() {
   try {
     const storedCities = JSON.parse(localStorage.getItem(EXCLUDED_CITY_KEY) || '[]');
@@ -187,7 +251,7 @@ function renderDashboardDiagnosis(report) {
 /* resume editor */
 const RESUME_TEMPLATE_KEY = 'careernav-resume-template';
 const RESUME_TEMPLATES = ['minimal', 'formal', 'english'];
-function blankProject() { return { name:'', role:'', techStack:'', description:'', highlight:'' }; }
+function blankProject() { return { name:'', role:'', techStack:'', description:'', challenge:'', highlight:'' }; }
 function blankExperience() { return { company:'', position:'', period:'', description:'', achievement:'' }; }
 function uniqueSkills(values=[]) {
   return [...new Set(values.map(value => String(value || '').trim()).filter(Boolean))];
@@ -208,21 +272,23 @@ function fillResumeForm(resume) {
   $('#graduation-year').value = resume.graduationYear || ''; $('#phone').value = resume.phone || '';
   $('#email').value = resume.email || ''; $('#education').value = resume.education || '本科';
   $('#school').value = resume.school || ''; $('#major').value = resume.major || '';
+  $('#education-category').value = resume.educationCategory || ''; $('#duration').value = resume.duration || '';
+  $('#study-mode').value = resume.studyMode || ''; $('#college').value = resume.college || '';
+  $('#department').value = resume.department || ''; $('#enrollment-date').value = resume.enrollmentDate || '';
+  $('#student-status').value = resume.studentStatus || ''; $('#expected-graduation-date').value = resume.expectedGraduationDate || '';
   $('#self-evaluation').value = resume.selfEvaluation || '';
   state.skills = uniqueSkills(resume.skills || []);
   state.projects = (resume.projects || []).map(item => ({...item}));
   state.experiences = (resume.experiences || []).map(item => ({...item}));
   renderSkillPicker(); renderProjectEditor(); renderExperienceEditor(); updateResumePreview();
-  if ((resume.skills || []).includes('Java')) loadJavaSkillProficiency(resume.id);
   loadVersions(); loadFactLocks(); resetEducationVerification(); loadEducationVerification(resume.id);
 }
 function emptyResume() {
   $('#resume-form').reset();
   state.activeResumeId = null; state.skills = [];
-  state.projects = [blankProject()]; state.experiences = [];
+  state.projects = [blankProject(), blankProject()]; state.experiences = [];
   $('#skills').value = ''; $('#education').value = '本科';
   renderSkillPicker(); renderProjectEditor(); renderExperienceEditor(); updateResumePreview();
-  if ((resume.skills || []).includes('Java')) loadJavaSkillProficiency(resume.id);
   const vbox = $('#resume-versions'); if (vbox) vbox.innerHTML = '<div class="empty-mini">保存后会在这里生成版本快照</div>';
   $$('#fact-locks input').forEach(box => { box.checked = false; });
   resetEducationVerification();
@@ -230,8 +296,6 @@ function emptyResume() {
 }
 function renderSkillPicker() {
   const selected = new Set(state.skills);
-  const javaVerify = $('#java-skill-verify');
-  if (javaVerify) javaVerify.hidden = !selected.has('Java');
   $$('#skill-picker [data-skill]').forEach(button => {
     const active = selected.has(button.dataset.skill);
     button.classList.toggle('active', active);
@@ -258,22 +322,23 @@ function addCustomSkill() {
 }
 function renderProjectEditor() {
   const box = $('#project-editor');
-  if (!state.projects.length) state.projects.push(blankProject());
+  while (state.projects.length < 2) state.projects.push(blankProject());
   box.innerHTML = state.projects.map((project,index) => `<div class="project-card" data-index="${index}">
     <div class="project-card-head"><div><strong>项目 ${index+1}</strong><small>STAR / 量化结果</small></div><button type="button" class="remove-row" data-remove-project="${index}" title="删除">×</button></div>
     <div class="project-fields">
       <label class="project-field"><span>项目名称</span><input class="project-name" value="${escapeHtml(project.name)}" placeholder="校园二手交易平台"></label>
       <label class="project-field"><span>担任角色</span><input class="project-role" value="${escapeHtml(project.role)}" placeholder="后端负责人"></label>
-      <label class="project-field wide"><span>技术栈</span><input class="project-tech" value="${escapeHtml(project.techStack)}" placeholder="Spring Boot / MySQL / Redis"></label>
-      <label class="project-field wide"><span>项目描述与个人职责</span><textarea class="project-description" rows="2" placeholder="负责订单、鉴权与缓存模块，完成接口设计与性能优化。">${escapeHtml(project.description)}</textarea></label>
-      <label class="project-field wide"><span>成果亮点（尽量量化）</span><input class="project-highlight" value="${escapeHtml(project.highlight)}" placeholder="响应时间降低 60%，支撑 3000+ 用户"></label>
+      <label class="project-field wide"><span>技术栈</span><input class="project-tech" value="${escapeHtml(project.techStack || '')}" placeholder="Spring Boot / MySQL / Redis / Vue"></label>
+      <label class="project-field wide"><span>项目背景、职责与实现</span><textarea class="project-description" rows="4" placeholder="项目解决什么问题；你负责哪些模块；核心接口和数据如何流转；采用哪些关键技术。">${escapeHtml(project.description || '')}</textarea></label>
+      <label class="project-field wide"><span>难点、取舍与故障处理</span><textarea class="project-challenge" rows="3" placeholder="遇到过什么并发、一致性、性能或异常问题；比较过哪些方案；为什么选择当前方案。">${escapeHtml(project.challenge || '')}</textarea></label>
+      <label class="project-field wide"><span>验证结果与个人贡献</span><textarea class="project-highlight" rows="2" placeholder="如何验证有效；你个人负责的范围；使用真实测试或业务结果，没有量化数据就写功能验证。">${escapeHtml(project.highlight || '')}</textarea></label>
     </div></div>`).join('');
 }
 function readProjectDrafts() {
   return $$('#project-editor .project-card').map(card => ({
     name: $('.project-name', card).value.trim(), role: $('.project-role', card).value.trim(),
     techStack: $('.project-tech', card).value.trim(), description: $('.project-description', card).value.trim(),
-    highlight: $('.project-highlight', card).value.trim()
+    challenge: $('.project-challenge', card).value.trim(), highlight: $('.project-highlight', card).value.trim()
   }));
 }
 function collectProjects() { return readProjectDrafts().filter(item => item.name); }
@@ -303,7 +368,12 @@ function buildResumeDraft() {
     name: $('#owner-name').value.trim(), targetRole: $('#target-role').value.trim(), city: $('#city').value.trim(),
     phone: $('#phone').value.trim(), email: $('#email').value.trim(), education: $('#education').value,
     school: $('#school').value.trim(), major: $('#major').value.trim(),
-    graduationYear: Number($('#graduation-year').value) || null, skills: [...state.skills],
+    graduationYear: Number($('#graduation-year').value) || null,
+    educationCategory: $('#education-category').value.trim(), duration: $('#duration').value.trim(),
+    studyMode: $('#study-mode').value.trim(), college: $('#college').value.trim(),
+    department: $('#department').value.trim(), enrollmentDate: $('#enrollment-date').value.trim(),
+    studentStatus: $('#student-status').value.trim(), expectedGraduationDate: $('#expected-graduation-date').value.trim(),
+    skills: [...state.skills],
     projects: collectProjects(), experiences: collectExperiences(), selfEvaluation: $('#self-evaluation').value.trim()
   };
 }
@@ -311,13 +381,16 @@ function collectResumePayload() {
   const draft = buildResumeDraft();
   const rawText = [
     draft.name, draft.targetRole, draft.school, draft.major, draft.education, draft.skills.join(' '),
-    ...draft.projects.map(item => [item.name,item.role,item.techStack,item.description,item.highlight].filter(Boolean).join(' ')),
+    ...draft.projects.map(item => [item.name,item.role,item.techStack,item.description,item.challenge,item.highlight].filter(Boolean).join(' ')),
     ...draft.experiences.map(item => [item.company,item.position,item.period,item.description,item.achievement].filter(Boolean).join(' ')),
     draft.selfEvaluation
   ].filter(Boolean).join(' / ');
   return {
     ownerName: draft.name, targetRole: draft.targetRole, city: draft.city, phone: draft.phone, email: draft.email,
     education: draft.education, school: draft.school, major: draft.major, graduationYear: draft.graduationYear,
+    educationCategory: draft.educationCategory, duration: draft.duration, studyMode: draft.studyMode,
+    college: draft.college, department: draft.department, enrollmentDate: draft.enrollmentDate,
+    studentStatus: draft.studentStatus, expectedGraduationDate: draft.expectedGraduationDate,
     skills: draft.skills, projects: draft.projects, experiences: draft.experiences,
     selfEvaluation: draft.selfEvaluation, rawText
   };
@@ -334,8 +407,13 @@ function resumeContacts(draft, compact=false) {
   return items.map(item => `<span>${item}</span>`).join(compact ? '' : '');
 }
 function renderEducationSection(draft, title='教育背景') {
+  const details = [
+    draft.studyMode, draft.duration ? `学制 ${draft.duration}` : '', draft.college, draft.department,
+    draft.studentStatus, draft.enrollmentDate ? `入学 ${draft.enrollmentDate}` : '',
+    draft.expectedGraduationDate ? `预计毕业 ${draft.expectedGraduationDate}` : ''
+  ].filter(Boolean).map(item => escapeHtml(item)).join(' · ');
   return `<section class="resume-section"><h2 class="resume-section-title">${title}</h2><div class="resume-section-content"><div class="resume-entry">
-    <div class="resume-entry-head"><div><strong>${resumeText(draft.school,'学校名称待补充')}</strong><p>${resumeText(draft.education,'学历待补充')} · ${resumeText(draft.major,'专业待补充')}</p></div><span class="resume-entry-meta">${draft.graduationYear ? `${draft.graduationYear} 届` : '毕业年份待补充'}</span></div>
+    <div class="resume-entry-head"><div><strong>${resumeText(draft.school,'学校名称待补充')}</strong><p>${resumeText(draft.education,'学历待补充')} · ${resumeText(draft.major,'专业待补充')}${draft.graduationYear ? ` · ${draft.graduationYear} 届` : ''}</p>${details ? `<p class="resume-education-details">${details}</p>` : ''}</div><span class="resume-entry-meta">${resumeText(draft.educationCategory,'')}</span></div>
   </div></div></section>`;
 }
 function renderSkillsSection(draft, title='专业技能') {
@@ -348,6 +426,7 @@ function renderProjectsSection(draft, title='项目经历') {
   const content = draft.projects.length ? draft.projects.map(project => `<div class="resume-entry">
     <div class="resume-entry-head"><div><strong>${resumeText(project.name)}</strong>${project.role ? `<p>${resumeText(project.role)}</p>` : ''}</div>${project.techStack ? `<span class="resume-entry-meta">${resumeText(project.techStack)}</span>` : ''}</div>
     ${project.description ? `<p class="resume-entry-body">${multilineText(project.description)}</p>` : ''}
+    ${project.challenge ? `<p class="resume-entry-body resume-project-challenge"><b>难点与取舍：</b>${multilineText(project.challenge)}</p>` : ''}
     ${project.highlight ? `<p class="resume-highlight">${multilineText(project.highlight)}</p>` : ''}
   </div>`).join('') : '<p class="resume-placeholder">补充项目经历，让招聘方看到你的技术落地能力。</p>';
   return `<section class="resume-section"><h2 class="resume-section-title">${title}</h2><div class="resume-section-content">${content}</div></section>`;
@@ -596,11 +675,14 @@ async function runEducationVerification(file) {
   }
 }
 function renderEducationVerification(report) {
+  state.educationReport = report;
   const passed = Boolean(report.passed);
-  const mode = passed ? 'consistent' : 'mismatch';
-  const badgeText = passed ? '已通过 · 合格学历'
+  const consistent = report.status === 'CONSISTENT';
+  const mode = passed ? 'consistent' : consistent ? 'review' : 'mismatch';
+  const badgeText = passed ? '已通过 · 学信网二维码校验'
+    : consistent ? '材料一致 · 二维码待核验'
     : report.status === 'MISMATCH' ? '未通过 · 不合格学历'
-    : '暂未通过 · 不合格学历';
+    : '待人工复核';
   setEducationVerificationStatus(badgeText, mode);
   const resume = state.resumes.find(item => Number(item.id) === Number(report.resumeId));
   if (resume) {
@@ -611,183 +693,393 @@ function renderEducationVerification(report) {
     resume.educationVerificationConfidence = report.confidence;
     resume.educationVerificationCheckedAt = report.checkedAt;
   }
-  const checks = (report.checks || []).map(item => {
-    const cls = item.status === 'MATCH' ? 'ok' : item.status === 'MISMATCH' ? 'bad' : 'unknown';
-    const label = item.status === 'MATCH' ? '一致' : item.status === 'MISMATCH' ? '不一致' : '无法判断';
-    return `<div class="edu-check-row ${cls}">
-      <div class="edu-check-name">${escapeHtml(item.label)}<small>${label}</small></div>
-      <div class="edu-check-values"><span><b>简历</b>${escapeHtml(item.resumeValue || '未填写')}</span><span><b>材料</b>${escapeHtml(item.proofValue || '未识别')}</span></div>
-      <p>${escapeHtml(item.detail || '')}</p>
-    </div>`;
-  }).join('');
-  const warnings = (report.warnings || []).map(item => `<li>${escapeHtml(item)}</li>`).join('');
+  const qrStatusClass = report.qrStatus === 'OFFICIAL_QR' ? 'ok' : report.qrDetected ? 'bad' : 'unknown';
+
+  const officialUrl = report.officialVerifyUrl || 'https://www.chsi.com.cn/xlcx/yzzw.jsp';
+  const miniProgram = String(report.qrStatusLabel || '').includes('小程序');
+  const qrVisual = report.qrImageDataUrl
+    ? `<div class="edu-qr-image"><img src="${escapeHtml(report.qrImageDataUrl)}" alt="学信网核验二维码"><span>使用微信扫码核验</span></div>`
+    : '<div class="edu-qr-icon"><span>▦</span></div>';
+  const qrPanel = `<div class="edu-qr-panel ${qrStatusClass} ${report.qrImageDataUrl ? 'has-image' : ''}">
+    ${qrVisual}
+    <div class="edu-qr-main">
+      <div class="edu-qr-title"><b>${escapeHtml(report.qrStatusLabel || (report.qrDetected ? '已识别二维码' : '未识别到二维码'))}</b><span>${report.qrVerificationCode ? `验证码 ${escapeHtml(report.qrVerificationCode)}` : '二维码仅提供核验入口'}</span></div>
+      <p>${miniProgram ? '这是学信网报告在线验证小程序二维码。请使用微信扫码，确认报告状态和本人信息。系统只识别二维码，不会自动登录或调用微信接口。' : report.qrDetected ? '二维码和验证码已从材料中自动提取。请打开学信网官方页面，完成最终报告状态核验；系统不会自动登录或绕过验证码。' : '可以在报告正文中找到在线验证码，前往学信网官方验真入口手动查询。'}</p>
+      <div class="edu-qr-actions"><a class="primary-button" href="${escapeHtml(officialUrl)}" target="_blank" rel="noopener noreferrer">打开学信网官网 ↗</a><button type="button" class="ghost-button" data-fill-education>将报告中的学历信息填入简历</button><button type="button" class="ghost-button edu-cancel-verification" data-cancel-education-verification>取消验证</button></div>
+      ${report.qrContent ? `<details><summary>查看二维码识别内容</summary><code>${escapeHtml(report.qrContent)}</code></details>` : ''}
+    </div>
+  </div>`;
   const resultBox = $('#education-proof-result');
   if (!resultBox) return;
-  resultBox.innerHTML = `<div class="edu-result-head ${mode}">
-      <div class="edu-result-score"><strong>${report.score}</strong><span>一致性</span></div>
-      <div class="edu-result-main"><div class="edu-result-title"><h4>${escapeHtml(report.statusLabel)}</h4><span>置信度 ${report.confidence}%</span><em class="edu-result-verdict ${passed ? 'pass' : 'fail'}">${passed ? '合格学历' : '不合格学历'}</em></div>
-        <p>${escapeHtml(report.summary)}</p>
-        <div class="edu-result-meta"><span>${passed ? '真实性核验通过，可用于岗位匹配' : '真实性核验未通过，岗位匹配将降低学历评分'}</span><span>${escapeHtml(report.reportType || '学历材料')}</span><span>${report.officialReportDetected ? '检测到学信网标识' : '未检测到官方报告标识'}</span><span>${report.extractionMode === 'LLM_ASSISTED' ? 'Agent 辅助抽取' : '规则抽取'}</span><span>凭证 ${escapeHtml(report.proofHash)}</span></div>
+  resultBox.innerHTML = qrPanel;
+}
+async function cancelEducationVerification() {
+  const resumeId = Number(state.educationReport?.resumeId || currentResumeId());
+  if (!resumeId) {
+    toast('无法取消验证', '没有找到对应的已保存简历', true);
+    return;
+  }
+  if (!window.confirm('取消后将删除本次学历核验结果，岗位匹配会恢复为“未核验”。已填写的教育背景不会被清空。确定取消吗？')) return;
+  const buttons = [...document.querySelectorAll('[data-cancel-education-verification]')];
+  buttons.forEach(button => { button.disabled = true; });
+  try {
+    const response = await fetch(`/api/resumes/${resumeId}/education-verification`, { method: 'DELETE' });
+    let payload = null;
+    try { payload = await response.json(); } catch { /* keep status fallback */ }
+    if (!response.ok || payload?.success === false) {
+      throw new Error(payload?.message || `取消验证失败 (${response.status})`);
+    }
+    state.educationReport = null;
+    const resume = state.resumes.find(item => Number(item.id) === resumeId);
+    if (resume) {
+      resume.educationVerified = false;
+      resume.educationVerificationStatus = 'UNVERIFIED';
+      resume.educationVerificationLabel = '未核验';
+      resume.educationVerificationScore = null;
+      resume.educationVerificationConfidence = null;
+      resume.educationVerificationCheckedAt = null;
+    }
+    resetEducationVerification();
+    toast('学历验证已取消', '核验记录已删除，之后可以重新上传材料验证');
+  } catch (error) {
+    toast('取消验证失败', error.message, true);
+    buttons.forEach(button => { button.disabled = false; });
+  }
+}
+function fillEducationFromProof() {
+  const report = state.educationReport;
+  if (!report) return;
+  const education = ['本科','硕士','大专','博士'].includes(report.proofEducation) ? report.proofEducation : $('#education').value;
+  const fields = [
+    ['学历', report.proofEducation], ['学校', report.proofSchool], ['专业', report.proofMajor], ['毕业年份', report.proofGraduationYear],
+    ['学历类别', report.proofEducationCategory], ['学制', report.proofDuration], ['学习形式', report.proofStudyMode],
+    ['分院 / 学院', report.proofCollege], ['系所', report.proofDepartment], ['入学日期', report.proofEnrollmentDate],
+    ['学籍状态', report.proofStudentStatus], ['预计毕业日期', report.proofExpectedGraduationDate]
+  ].filter(item => item[1]);
+  if (!fields.length) { toast('没有可填入的信息', '材料中未识别到学校、学历、专业或毕业年份', true); return; }
+  if (!window.confirm(`将用报告信息更新：${fields.map(item => item[0]).join('、')}。请确认这些信息确实属于你。`)) return;
+  if (report.proofEducation) $('#education').value = education;
+  if (report.proofSchool) $('#school').value = report.proofSchool;
+  if (report.proofMajor) $('#major').value = report.proofMajor;
+  if (report.proofGraduationYear) $('#graduation-year').value = report.proofGraduationYear;
+  if (report.proofEducationCategory) $('#education-category').value = report.proofEducationCategory;
+  if (report.proofDuration) $('#duration').value = report.proofDuration;
+  if (report.proofStudyMode) $('#study-mode').value = report.proofStudyMode;
+  if (report.proofCollege) $('#college').value = report.proofCollege;
+  if (report.proofDepartment) $('#department').value = report.proofDepartment;
+  if (report.proofEnrollmentDate) $('#enrollment-date').value = report.proofEnrollmentDate;
+  if (report.proofStudentStatus) $('#student-status').value = report.proofStudentStatus;
+  if (report.proofExpectedGraduationDate) $('#expected-graduation-date').value = report.proofExpectedGraduationDate;
+  updateResumePreview();
+  toast('学历信息已填入', '请核对后点击“保存到仓库”；修改学历字段会要求重新核验');
+}
+/* ---------- 面试驱动的技能证据 ---------- */
+async function loadInterviewEvidence(resumeId, jobId) {
+  if (!resumeId || !jobId) { state.interviewEvidence = []; return []; }
+  state.interviewEvidenceLoading = true;
+  try {
+    const query = new URLSearchParams({ resumeId: String(resumeId) });
+    if (jobId) query.set('jobId', String(jobId));
+    state.interviewEvidence = await api(`/api/interviews/evidence?${query}`);
+    return state.interviewEvidence;
+  } catch (error) {
+    state.interviewEvidence = [];
+    return [];
+  } finally {
+    state.interviewEvidenceLoading = false;
+  }
+}
+function renderInterviewEvidenceCards() {
+  return (state.interviewEvidence || []).map(item => {
+    const verified = item.verified ? 'verified' : 'pending';
+    const evidence = (item.evidence || []).slice(0, 3).map(text => `<li>${escapeHtml(text)}</li>`).join('');
+    return `<article class="interview-evidence-card ${verified}">
+      <div class="interview-evidence-score"><strong>${item.score ?? '--'}</strong><span>面试评分</span></div>
+      <div class="interview-evidence-main">
+        <div class="interview-evidence-title"><h4>${escapeHtml(item.skill || '技术能力')}</h4><span>${escapeHtml(item.level || '待验证')}</span><em>${item.verified ? '已形成回答证据' : '证据不足'}</em></div>
+        <div class="interview-evidence-meta"><span>置信度 ${Math.round((item.confidence || 0) * 100)}%</span><span>${item.source === 'INTERVIEW_FALLBACK' ? '规则汇总，需人工复核' : 'AI 面试官评估'}</span></div>
+        <ul>${evidence || '<li>面试中尚未形成明确证据</li>'}</ul>
+      </div>
+    </article>`;
+  }).join('');
+}
+function renderInterviewEvidenceBlock(report) {
+  const hasJob = Boolean(report?.jobId);
+  const cards = renderInterviewEvidenceCards();
+  const summary = state.interviewEvidenceLoading
+    ? '正在读取最近一场面试的技能证据…'
+    : cards
+      ? '以下分数来自候选人真实回答，只用于最终诊断和补强建议，不会反向否定简历中已填写的技能；它不是官方技能认证。'
+      : hasJob
+        ? '当前岗位还没有完成的技能面试。先参加五轮面试，Agent 才会判断你能否用回答证明简历中的技能。'
+        : '请选择一个具体岗位后，再进行技能面试验证。';
+  return `<section class="diagnosis-interview-evidence">
+    <div class="interview-evidence-head">
+      <div><span class="eyebrow">INTERVIEW-DERIVED EVIDENCE</span><h3>面试技能证据</h3><p>${escapeHtml(summary)}</p></div>
+      <div class="interview-evidence-actions">
+        <button type="button" class="ghost-button" data-restart-interview>重新开始面试</button>
+        <button type="button" class="ghost-button" data-open-project-interview>用项目源码深挖</button>
       </div>
     </div>
-    <div class="edu-check-grid">${checks}</div>
-    <details class="edu-warning-list"><summary>核验边界与注意事项</summary><ul>${warnings}</ul></details>`;
+    ${cards ? `<div class="interview-evidence-grid">${cards}</div>` : ''}
+  </section>`;
 }
-/* ---------- Java 技能水平验证 ---------- */
-async function loadJavaSkillProficiency(resumeId) {
-  const badge = $('#java-proficiency-badge');
-  if (!badge || !resumeId) return;
-  try {
-    const data = await api(`/api/skills/tests/proficiency?resumeId=${resumeId}&skill=Java`);
-    if (data?.verifiedLevel) {
-      const lowScore = Number(data.score || 0) < 45;
-      badge.textContent = `${lowScore ? '测试不达标' : '已验证'} · ${data.verifiedLevel} · ${data.score ?? '--'}分 · BKT ${Math.round((data.bktMastery || 0) * 100)}%`;
-      badge.className = `skill-proficiency-badge verified ${lowScore ? 'low' : ''}`.trim();
-      badge.title = `测试得分 ${data.score ?? '--'} · 测试置信度 ${Math.round((data.confidence || 0) * 100)}% · BKT置信度 ${Math.round((data.bktConfidence || 0) * 100)}%`;
-    } else {
-      badge.textContent = '未验证';
-      badge.className = 'skill-proficiency-badge';
-      badge.title = '';
-    }
-  } catch { /* 技能验证状态失败不阻塞简历编辑 */ }
+function interviewResumeLabel(resumeId) {
+  const resume = state.resumes.find(item => item.id === Number(resumeId));
+  return resume ? `${resume.ownerName} · ${resume.targetRole}` : '当前诊断简历';
 }
-function closeJavaSkillTest() {
-  if (state.skillTestTimer) clearInterval(state.skillTestTimer);
-  state.skillTestTimer = null;
-  const modal = $('#skill-test-modal');
-  if (modal) { modal.classList.remove('open'); modal.setAttribute('aria-hidden','true'); }
+function interviewJobLabel(jobId) {
+  const job = state.jobs.find(item => item.id === Number(jobId));
+  return job ? `${job.title} · ${job.company}` : '当前诊断岗位';
 }
-async function openJavaSkillTest() {
-  const resumeId = currentResumeId();
-  if (!resumeId) { toast('无法开始验证', '请先保存一次简历', true); return; }
-  const modal = $('#skill-test-modal');
-  const body = $('#skill-test-body');
-  modal.classList.add('open'); modal.setAttribute('aria-hidden','false');
-  body.innerHTML = '<div class="loading-card"><i></i>正在生成 Java 多轮验证题目...</div>';
-  try {
-    const test = await post('/api/skills/tests/java/multi-round', { resumeId });
-    state.skillTest = test;
-    state.skillQuestionStartedAt = {};
-    state.skillRoundStartedAt = Date.now();
-    renderJavaSkillTest(test);
-    startSkillTestTimer();
-  } catch (error) {
-    body.innerHTML = `<div class="gd-error">创建测试失败：${escapeHtml(error.message)}</div>`;
+function renderInterviewJobFocus(jobId) {
+  const box = $('#interview-focus-tags');
+  if (!box) return;
+  const job = jobById(jobId);
+  if (!job) {
+    box.innerHTML = '<small>选择岗位后自动生成</small>';
+    return;
   }
+  const title = String(job.title || '').toLowerCase();
+  const skills = Array.isArray(job.skills) ? job.skills.filter(Boolean) : [];
+  const preferred = [];
+  if (/machine learning|机器学习|算法/.test(title)) preferred.push('Machine Learning', 'Python', 'PyTorch', 'TensorFlow', 'Distributed Systems', 'AWS');
+  else if (/test|测试/.test(title)) preferred.push('自动化测试', 'Selenium', '接口测试', 'CI/CD', 'Java', 'Python');
+  else if (/frontend|前端/.test(title)) preferred.push('JavaScript', 'TypeScript', 'Vue', 'React', 'CSS', 'Webpack');
+  else if (/java|后端|backend/.test(title)) preferred.push('Java', 'Spring', 'Spring Boot', 'MySQL', 'Redis', 'Microservices');
+  else if (/agent|rag|llm/.test(title)) preferred.push('RAG', 'Agent', 'LangChain', 'LangGraph', 'Python', '向量检索');
+  const ranked = [...new Set([
+    ...preferred.filter(item => skills.some(skill => String(skill).toLowerCase().includes(item.toLowerCase()))),
+    ...skills
+  ])].slice(0, 6);
+  box.innerHTML = ranked.length
+    ? ranked.map(skill => `<span>${escapeHtml(skill)}</span>`).join('')
+    : '<small>岗位技能信息不足，将根据岗位职责继续分析</small>';
 }
-function renderJavaSkillTest(test) {
-  const levelLabel = { BASIC: '初级', INTERMEDIATE: '中级', ADVANCED: '高级' };
-  const roundNo = Number(test.roundNo || 1);
-  const totalRounds = Number(test.totalRounds || 3);
-  const topics = (test.targetTopics || []).length
-    ? `<div class="skill-round-focus"><b>本轮重点</b>${test.targetTopics.map(t => `<span>${escapeHtml(t)}</span>`).join('')}</div>`
-    : '';
-  const questions = (test.questions || []).map((q, index) => `
-    <fieldset class="skill-test-question" data-question-id="${q.id}">
-      <legend><span>${String(index+1).padStart(2,'0')}</span><div><b>${escapeHtml(levelLabel[q.level] || q.level)} · ${escapeHtml(q.topic || 'Java')}</b><p>${escapeHtml(q.questionText)}</p></div></legend>
-      <div class="skill-test-options">${(q.options || []).map(o => `<label><input type="radio" name="skill-q-${q.id}" value="${escapeHtml(o.key)}"><span><b>${escapeHtml(o.key)}</b>${escapeHtml(o.text)}</span></label>`).join('')}</div>
-      <label class="skill-confidence">本题把握程度
-        <select data-question-confidence><option value="0.3">低</option><option value="0.6" selected>中</option><option value="1">高</option></select>
-      </label>
-    </fieldset>`).join('');
-  $('#skill-test-body').innerHTML = `
-    <span class="eyebrow">JAVA SKILL CHECK · MULTI-ROUND</span>
-    <h2>Java 水平验证 · 第 ${roundNo} / ${totalRounds} 轮</h2>
-    <p class="gd-sub">第 1 轮进行广度诊断，后续轮次会针对低掌握点更换题目复测。答题时间、主观把握度和 BKT 掌握概率会共同形成猜测风险。</p>
-    ${topics}
-    <div class="skill-test-toolbar"><span>本轮到计时：<b id="skill-test-countdown">--:--</b></span><span>本轮 ${test.questions?.length || 0} 题 · 难度加权</span></div>
-    <form id="skill-test-form" class="skill-test-form">${questions}</form>
-    <div class="skill-test-note">题库包含公开题与项目内部校验题。测试结果是限时抽样的能力证据，BKT 用于长期掌握追踪，不等同于官方证书。</div>
-    <div class="skill-test-actions"><button type="button" class="ghost-button" id="cancel-skill-test">取消</button><button type="button" class="primary-button" id="submit-skill-test">提交本轮</button></div>`;
-  $('#submit-skill-test').addEventListener('click', () => submitJavaSkillTest(false));
-  $('#cancel-skill-test').addEventListener('click', closeJavaSkillTest);
-  $('#skill-test-form').addEventListener('change', event => {
-    const field = event.target.closest('.skill-test-question');
-    if (!field) return;
-    const id = Number(field.dataset.questionId);
-    if (!state.skillQuestionStartedAt[id]) state.skillQuestionStartedAt[id] = Date.now();
+/* ---------- 简历 PDF / 图片导入 ---------- */
+function setResumeImportStatus(title, detail, progress=null) {
+  const box = $('#resume-import-status');
+  if (!box) return;
+  const bar = progress == null ? '' : `<div class="resume-import-progress"><i style="width:${Math.max(0, Math.min(100, progress))}%"></i></div>`;
+  box.innerHTML = `<div class="resume-import-loading"><i></i><div><strong>${escapeHtml(title)}</strong><p>${escapeHtml(detail)}</p>${bar}</div></div>`;
+}
+function openResumeImport() {
+  const modal = $('#resume-import-modal');
+  if (!modal) return;
+  state.resumeImport = null;
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+  $('#resume-import-body').innerHTML = `
+    <span class="eyebrow">OCR / PDF RESUME IMPORT</span>
+    <h2>导入已有简历</h2>
+    <p class="gd-sub">PDF 优先读取文本层；扫描 PDF 和图片会在浏览器本地使用 OCR 识别。识别结果先预览，确认后才填入编辑器。</p>
+    <div class="resume-import-upload">
+      <label class="resume-import-file"><input type="file" id="resume-import-file" accept=".pdf,.docx,.png,.jpg,.jpeg,.webp"><span class="resume-import-icon">⇧</span><strong>选择 PDF、DOCX 或简历图片</strong><small>PDF / DOCX / PNG / JPG / WebP，最大 10MB</small></label>
+      <button type="button" class="primary-button" id="resume-import-run">识别并生成简历</button>
+    </div>
+    <div class="resume-import-note"><b>隐私与准确性</b><p>图片 OCR 在浏览器中执行；文件与识别文本发送到本机后端，配置在线模型时，脱敏后的文本会用于结构化解析。扫描件和手写内容可能存在误识别，姓名、电话、时间、学校和数字必须人工核对。</p></div>
+    <div id="resume-import-status"></div>
+    <div id="resume-import-result"></div>`;
+  $('#resume-import-file').addEventListener('change', event => {
+    const file = event.target.files?.[0];
+    const label = event.target.closest('label');
+    if (file && label) {
+      label.querySelector('strong').textContent = file.name;
+      label.querySelector('small').textContent = `${(file.size / 1024 / 1024).toFixed(2)} MB · 已选择`;
+    }
   });
+  $('#resume-import-run').addEventListener('click', runResumeImport);
 }
-function startSkillTestTimer() {
-  if (state.skillTestTimer) clearInterval(state.skillTestTimer);
-  const expires = new Date(state.skillTest.expiresAt).getTime();
-  const tick = () => {
-    const remaining = Math.max(0, Math.floor((expires - Date.now()) / 1000));
-    const node = $('#skill-test-countdown');
-    if (node) node.textContent = `${String(Math.floor(remaining/60)).padStart(2,'0')}:${String(remaining%60).padStart(2,'0')}`;
-    if (remaining <= 0) {
-      clearInterval(state.skillTestTimer); state.skillTestTimer = null;
-      if (state.skillTest && !state.skillTest.submitting && !state.skillTest.submitted) submitJavaSkillTest(true);
+function closeResumeImport() {
+  const modal = $('#resume-import-modal');
+  if (!modal) return;
+  modal.classList.remove('open');
+  modal.setAttribute('aria-hidden', 'true');
+}
+async function ocrResumeImage(image, onProgress) {
+  if (!window.Tesseract) throw new Error('OCR 组件加载失败，请检查网络后重试');
+  const result = await Tesseract.recognize(image, 'chi_sim+eng', {
+    logger: message => {
+      if (message.status === 'recognizing text' && onProgress) onProgress(message.progress || 0);
     }
-  };
-  tick(); state.skillTestTimer = setInterval(tick, 1000);
-}
-async function submitJavaSkillTest(autoSubmit=false) {
-  if (!state.skillTest || state.skillTest.submitting || state.skillTest.submitted) return;
-  const answers = [];
-  const now = Date.now();
-  $$('#skill-test-form .skill-test-question').forEach(field => {
-    const checked = $('input[type=radio]:checked', field);
-    if (!checked) return;
-    const questionId = Number(field.dataset.questionId);
-    const startedAt = state.skillQuestionStartedAt[questionId] || state.skillRoundStartedAt || now;
-    const confidence = Number($('[data-question-confidence]', field)?.value || 0.6);
-    answers.push({ questionId, option: checked.value, responseMs: Math.max(1, now - startedAt), selfConfidence: confidence });
   });
-  if (!autoSubmit && answers.length < state.skillTest.questions.length) {
-    if (!window.confirm(`还有 ${state.skillTest.questions.length - answers.length} 题未作答，确定提交吗？`)) return;
+  return (result?.data?.text || '').trim();
+}
+function pdfItemsToText(items) {
+  const fragments = (items || [])
+    .filter(item => item && String(item.str || '').trim())
+    .map((item, index) => ({
+      text: String(item.str).trim(),
+      x: Number(item.transform?.[4] || 0),
+      y: Number(item.transform?.[5] || 0),
+      width: Number(item.width || 0),
+      index
+    }));
+  if (!fragments.length) return '';
+  const lines = [];
+  fragments.sort((a, b) => b.y - a.y || a.x - b.x || a.index - b.index);
+  for (const fragment of fragments) {
+    let line = lines.find(candidate => Math.abs(candidate.y - fragment.y) <= 2.8);
+    if (!line) {
+      line = { y: fragment.y, items: [] };
+      lines.push(line);
+    }
+    line.items.push(fragment);
   }
-  state.skillTest.submitting = true;
-  if (state.skillTestTimer) clearInterval(state.skillTestTimer);
-  state.skillTestTimer = null;
-  const button = $('#submit-skill-test');
-  if (button) { button.disabled = true; button.textContent = autoSubmit ? '时间到，正在提交...' : '正在评分...'; }
+  return lines
+    .sort((a, b) => b.y - a.y)
+    .map(line => {
+      const parts = line.items.sort((a, b) => a.x - b.x || a.index - b.index).map(item => item.text);
+      let text = '';
+      for (const part of parts) {
+        const previous = text.slice(-1);
+        const current = part.slice(0, 1);
+        if (previous && current && /[A-Za-z0-9]/.test(previous) && /[A-Za-z0-9]/.test(current)) text += ' ';
+        text += part;
+      }
+      return text
+        .replace(/\s+/g, ' ')
+        .replace(/([\u3400-\u9fff])\s+(?=[\u3400-\u9fff])/g, '$1')
+        .replace(/\s+([，。；：、！？）】》])/g, '$1')
+        .replace(/([（【《])\s+/g, '$1')
+        .trim();
+    })
+    .filter(Boolean)
+    .join('\n');
+}
+async function extractTextFromPdf(file) {
+  if (!window.pdfjsLib) throw new Error('PDF 识别组件加载失败，请检查网络后重试');
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+  const data = new Uint8Array(await file.arrayBuffer());
+  const pdf = await pdfjsLib.getDocument({ data }).promise;
+  const pages = Math.min(pdf.numPages, 8);
+  const pageTexts = [];
+  let textLayerPages = 0;
+  let ocrPages = 0;
+  for (let pageNo = 1; pageNo <= pages; pageNo++) {
+    const page = await pdf.getPage(pageNo);
+    setResumeImportStatus(`正在读取第 ${pageNo} / ${pages} 页`, '优先重建 PDF 段落布局，扫描页将自动切换为 OCR', Math.round((pageNo - 1) / pages * 100));
+    const content = await page.getTextContent();
+    let text = pdfItemsToText(content.items);
+    if (text.length >= 30) {
+      pageTexts.push(text);
+      textLayerPages += 1;
+      continue;
+    }
+    const viewport = page.getViewport({ scale: 2 });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    const context = canvas.getContext('2d', { alpha: false });
+    await page.render({ canvasContext: context, viewport }).promise;
+    text = await ocrResumeImage(canvas, progress => {
+      setResumeImportStatus(`正在 OCR 第 ${pageNo} / ${pages} 页`, `当前页识别进度 ${Math.round(progress * 100)}%`, Math.round(((pageNo - 1 + progress) / pages) * 100));
+    });
+    pageTexts.push(text);
+    ocrPages += 1;
+  }
+  const method = ocrPages === 0 ? 'PDF_TEXT' : textLayerPages === 0 ? 'PDF_OCR' : 'PDF_TEXT_OCR_MIXED';
+  return { text: pageTexts.filter(Boolean).join('\n\n'), method, pages: pdf.numPages, processedPages: pages };
+}
+async function runResumeImport() {
+  const input = $('#resume-import-file');
+  const file = input?.files?.[0];
+  if (!file) { toast('请选择文件', '支持 PDF、DOCX、PNG、JPG 和 WebP', true); return; }
+  if (file.size > 10 * 1024 * 1024) { toast('文件过大', '导入文件不能超过 10MB', true); return; }
+  const button = $('#resume-import-run');
+  if (button) button.disabled = true;
+  const resultBox = $('#resume-import-result');
+  if (resultBox) resultBox.innerHTML = '';
   try {
-    const result = await post(`/api/skills/tests/${state.skillTest.sessionId}/rounds/${state.skillTest.roundNo}/submit`, { answers });
-    state.skillTest.submitting = false;
-    if (result.completed && result.result) {
-      state.skillTest.submitted = true;
-      renderJavaSkillTestResult(result.result, result);
-      return;
+    let clientExtraction = { text: '', method: 'SERVER_TEXT', pages: null };
+    if (/\.pdf$/i.test(file.name)) {
+      clientExtraction = await extractTextFromPdf(file);
+      if (clientExtraction.processedPages < clientExtraction.pages) {
+        toast('页数较多', `本次只处理前 ${clientExtraction.processedPages} 页，其余内容请手动补充`, true);
+      }
+    } else if (/\.(png|jpe?g|webp)$/i.test(file.name)) {
+      setResumeImportStatus('正在识别图片文字', 'OCR 在本机浏览器中执行，分辨率越高识别越准确', 5);
+      const text = await ocrResumeImage(file, progress => setResumeImportStatus('正在识别图片文字', `识别进度 ${Math.round(progress * 100)}%`, progress * 100));
+      clientExtraction = { text, method: 'OCR_IMAGE', pages: 1 };
     }
-    if (result.nextRound) {
-      state.skillTest = result.nextRound;
-      state.skillQuestionStartedAt = {};
-      state.skillRoundStartedAt = Date.now();
-      renderJavaSkillTest(result.nextRound);
-      startSkillTestTimer();
-      toast(`进入第 ${result.nextRound.roundNo} 轮`, '正在针对薄弱知识点更换题目复测');
-      return;
-    }
-    throw new Error('本轮结果格式异常');
+    setResumeImportStatus('正在结构化简历', 'Agent 正在区分教育、技能、项目和经历，并检查缺失字段', 90);
+    const form = new FormData();
+    form.append('file', file);
+    form.append('extractedText', clientExtraction.text || '');
+    form.append('extractionMethod', clientExtraction.method || 'SERVER_TEXT');
+    const response = await fetch('/api/resumes/import', { method: 'POST', body: form });
+    let payload;
+    try { payload = await response.json(); } catch { throw new Error(`服务返回异常 (${response.status})`); }
+    if (!response.ok || payload.success === false) throw new Error(payload.message || '简历解析失败');
+    state.resumeImport = payload.data;
+    renderResumeImportResult(payload.data);
   } catch (error) {
-    state.skillTest.submitting = false;
-    if (button) { button.disabled = false; button.textContent = '提交本轮'; }
-    toast('提交失败', error.message, true);
+    const box = $('#resume-import-status');
+    if (box) box.innerHTML = `<div class="resume-import-error"><strong>导入失败</strong><p>${escapeHtml(error.message)}</p><small>数字版 PDF 不需要 OCR；如果 PDF 是扫描件，请上传清晰图片或检查浏览器能否访问 OCR 资源。</small></div>`;
+    toast('简历导入失败', error.message, true);
+  } finally {
+    if (button) button.disabled = false;
   }
 }
-function renderJavaSkillTestResult(result, roundResult={}) {
-  const levelLabel = { BASIC: '初级题', INTERMEDIATE: '中级题', ADVANCED: '高级题' };
-  const breakdown = (result.levelBreakdown || []).map(x => `<div class="skill-test-level"><span>${levelLabel[x.level] || x.level}</span><div><i style="width:${x.accuracy}%"></i></div><b>${x.correct}/${x.total} · ${x.accuracy}%</b></div>`).join('');
-  const weak = (result.weakTopics || []).length ? result.weakTopics.map(x => `<span>${escapeHtml(x)}</span>`).join('') : '<span class="ok">暂无明显薄弱主题</span>';
-  const bktPercent = result.bktMastery == null ? null : Math.round(result.bktMastery * 100);
-  const bktTopics = (result.bktBreakdown || []).map(x => `<div class="skill-bkt-topic"><span>${escapeHtml(x.knowledgeComponent)}</span><div><i style="width:${Math.round(x.masteryProbability * 100)}%"></i></div><b>${Math.round(x.masteryProbability * 100)}% · ${x.attempts}次</b></div>`).join('');
-  const risk = roundResult.guessRisk == null ? null : Math.round(roundResult.guessRisk * 100);
-  const consistency = roundResult.consistency == null ? null : Math.round(roundResult.consistency * 100);
-  const riskLabel = risk == null ? '--' : risk >= 60 ? '高，需要复测' : risk >= 35 ? '中，建议复测' : '低';
-  const bktPanel = bktPercent == null ? '' : `<div class="skill-bkt-panel"><div class="skill-bkt-head"><div><span class="eyebrow">BKT MASTERY TRACE</span><strong>BKT 掌握概率 ${bktPercent}%</strong></div><span>完成 ${roundResult.totalRounds || '--'} 轮验证</span></div><p>BKT 会跨轮更新知识点掌握概率，并结合作答时间、主观把握度和同知识点一致性估计猜测风险。</p><div class="skill-bkt-summary"><span>BKT 置信度 <b>${Math.round((result.bktConfidence || 0) * 100)}%</b></span><span>同知识点一致性 <b>${consistency == null ? '--' : consistency + '%'}</b></span><span>疑似猜测风险 <b class="${risk >= 60 ? 'high' : risk >= 35 ? 'mid' : 'low'}">${riskLabel}${risk == null ? '' : ' · ' + risk + '%'}</b></span></div><div class="skill-bkt-topics">${bktTopics}</div></div>`;
-  const reviews = (result.reviews || []).map((x, i) => `<div class="skill-review ${x.correct?'ok':'miss'}"><div><b>${String(i+1).padStart(2,'0')} · ${escapeHtml(x.topic || '')}</b><span>${x.correct?'正确':'错误'}</span></div><p>${escapeHtml(x.questionText)}</p><small>你的选择：${escapeHtml(x.selectedOption || '未作答')} · 正确答案：${escapeHtml(x.correctOption)}</small><em>${escapeHtml(x.explanation || '')}</em></div>`).join('');
-  $('#skill-test-body').innerHTML = `
-    <span class="eyebrow">JAVA SKILL CHECK · RESULT</span><h2>Java 水平验证结果</h2>
-    <div class="skill-result-head"><div class="skill-result-score" style="--score:${result.score}"><strong>${result.score}</strong><span>综合得分</span></div><div><h3>${escapeHtml(result.level)}</h3><p>答对 ${result.correctCount} / ${result.totalCount} 题 · 置信度 ${Math.round((result.confidence||0)*100)}%</p><span class="skill-test-status">${result.proficiencySaved ? '测试成绩已保存，并纳入岗位技能评分' : '超时提交，未写入技能画像'}</span></div></div>
-    <div class="skill-test-levels">${breakdown}</div>
-    ${bktPanel}
-    <div class="skill-test-weak"><b>薄弱主题</b><div>${weak}</div></div>
-    <div class="skill-review-list">${reviews}</div>
-    <div class="skill-test-actions"><button type="button" class="ghost-button" id="close-skill-result">关闭</button>${result.proficiencySaved ? '<button type="button" class="primary-button" id="retry-skill-test">再测一次</button>' : ''}</div>`;
-  $('#close-skill-result').addEventListener('click', closeJavaSkillTest);
-  const retry = $('#retry-skill-test'); if (retry) retry.addEventListener('click', openJavaSkillTest);
-  const resumeId = currentResumeId(); if (resumeId) loadJavaSkillProficiency(resumeId);
+function renderResumeImportResult(result) {
+  const fields = [
+    ['姓名', result.ownerName], ['目标岗位', result.targetRole], ['学历', result.education], ['学校', result.school],
+    ['专业', result.major], ['手机', result.phone], ['邮箱', result.email], ['城市', result.city]
+  ];
+  const found = fields.filter(item => item[1] && !String(item[1]).includes('待确认'));
+  const missing = fields.filter(item => !item[1] || String(item[1]).includes('待确认'));
+  const fieldRows = found.map(item => `<span><b>${escapeHtml(item[0])}</b>${escapeHtml(item[1])}</span>`).join('');
+  const missingRows = missing.map(item => `<span class="missing"><b>${escapeHtml(item[0])}</b>待确认</span>`).join('');
+  const skills = (result.skills || []).map(skill => `<span>${escapeHtml(skill)}</span>`).join('');
+  const projects = (result.projects || []).map(item => {
+    const meta = [item.role, item.techStack].filter(Boolean).join(' · ');
+    const detail = compactText([item.description, item.challenge, item.highlight].filter(Boolean).join(' '), 180);
+    return `<li><b>${escapeHtml(item.name || '待确认项目')}</b>${meta ? `<em>${escapeHtml(meta)}</em>` : ''}<span>${escapeHtml(detail || '未识别到项目描述，请手动补充')}</span></li>`;
+  }).join('');
+  const experiences = (result.experiences || []).map(item => {
+    const meta = [item.position, item.period].filter(Boolean).join(' · ');
+    const detail = compactText([item.description, item.achievement].filter(Boolean).join(' '), 180);
+    return `<li><b>${escapeHtml(item.company || '待确认公司')}</b>${meta ? `<em>${escapeHtml(meta)}</em>` : ''}<span>${escapeHtml(detail || '未识别到工作内容，请手动补充')}</span></li>`;
+  }).join('');
+  const warnings = (result.warnings || []).map(item => `<li>${escapeHtml(item)}</li>`).join('');
+  $('#resume-import-status').innerHTML = `<div class="resume-import-summary"><div><strong>${result.confidence}%</strong><span>结构化置信度</span></div><div><b>${escapeHtml(result.extractionMethod || '')}</b><span>${result.extractionMethod?.includes('OCR') ? '包含 OCR，需重点核对' : 'PDF / 文档文本解析'}</span></div><div><b>${found.length} / ${fields.length}</b><span>基本信息已识别</span></div></div>`;
+  $('#resume-import-result').innerHTML = `
+    <div class="resume-import-preview">
+      <div class="resume-import-section"><h3>基本信息</h3><div class="resume-import-fields">${fieldRows}${missingRows}</div></div>
+      <div class="resume-import-section"><h3>技能关键词</h3><div class="resume-import-skills">${skills || '<span class="empty">未识别到技能</span>'}</div></div>
+      <div class="resume-import-section"><h3>项目经历（${(result.projects || []).length}）</h3><ul class="resume-import-list">${projects || '<li class="empty">未识别到项目经历，请手动补充</li>'}</ul></div>
+      <div class="resume-import-section"><h3>实习 / 工作经历（${(result.experiences || []).length}）</h3><ul class="resume-import-list">${experiences || '<li class="empty">未识别到实习或工作经历，请手动补充</li>'}</ul></div>
+      ${warnings ? `<details class="resume-import-warnings"><summary>导入检查提示（${(result.warnings || []).length}）</summary><ul>${warnings}</ul></details>` : ''}
+      <details class="resume-import-raw"><summary>查看 OCR / PDF 识别原文</summary><pre>${escapeHtml(result.rawText || '')}</pre></details>
+      <div class="resume-import-actions"><button type="button" class="ghost-button" data-close-resume-import>取消</button><button type="button" class="primary-button" id="apply-resume-import">确认并填入简历编辑器</button></div>
+    </div>`;
+  $('#apply-resume-import').addEventListener('click', applyResumeImport);
+}
+function applyResumeImport() {
+  const result = state.resumeImport;
+  if (!result) return;
+  if (!window.confirm('导入结果将替换当前编辑器中的未保存内容。确定继续吗？')) return;
+  emptyResume();
+  $('#owner-name').value = result.ownerName || '';
+  $('#target-role').value = result.targetRole || '';
+  $('#city').value = result.city || '';
+  $('#phone').value = result.phone || '';
+  $('#email').value = result.email || '';
+  $('#education').value = ['本科','硕士','大专','博士'].includes(result.education) ? result.education : '本科';
+  $('#school').value = result.school || '';
+  $('#major').value = result.major || '';
+  $('#graduation-year').value = result.graduationYear || '';
+  $('#self-evaluation').value = result.selfEvaluation || '';
+  state.skills = uniqueSkills(result.skills || []);
+  state.projects = (result.projects || []).map(item => ({...item}));
+  state.experiences = (result.experiences || []).map(item => ({...item}));
+  renderSkillPicker();
+  renderProjectEditor();
+  renderExperienceEditor();
+  updateResumePreview();
+  closeResumeImport();
+  navigate('resume');
+  toast('已填入简历编辑器', '请先核对 OCR 识别内容，再点击“保存到仓库”');
 }
 /* ---------- ATS 体检 ---------- */
 function openAts() {
@@ -1018,6 +1310,7 @@ function applyProjectDraft() {
     role: '项目负责人',
     techStack: (state.guidanceBody && state.guidanceBody.techStack) || '',
     description: draft.description || '',
+    challenge: '',
     highlight: draft.highlight || ''
   });
   renderProjectEditor();
@@ -1074,7 +1367,7 @@ async function saveVersion() {
   const id = currentResumeId();
   if (!id) { toast('无法保存版本', '请先保存一次简历', true); return; }
   const label = $('#version-label')?.value || '母版';
-  const jobId = Number($('#diagnosis-job')?.value || state.activeJobId) || null;
+  const jobId = Number(state.interview?.jobId || state.activeJobId) || null;
   try {
     const v = await post(`/api/resumes/${id}/versions`, { label, targetJobId: jobId, note: '' });
     const extra = v.matchScore == null ? '' : ` · 匹配 ${v.matchScore} 分`;
@@ -1189,13 +1482,13 @@ function renderCityJobs() {
     const reqPreview = compactText(job.jobRequirements, 105);
     const reasons = (item.reasons || []).slice(0,3).map(reason => `<span>• ${escapeHtml(reason)}</span>`).join('');
     return `<article class="panel job-card city-job-card" data-job="${job.id}">
-      <div class="job-card-head"><div class="job-company"><div class="company-logo">${escapeHtml(String(job.company || '岗').slice(0,1))}</div><div><h3>${escapeHtml(job.title)}</h3><p>${escapeHtml(job.company)} · ${escapeHtml(job.experience || '经验不限')}</p></div></div><div class="match-badge"><span class="score-source rule">规则参考</span><strong>${item.matchScore}%</strong><span>${escapeHtml(item.matchLevel)}</span></div></div>
-      <div class="job-meta"><span class="salary">${escapeHtml(job.salary || '薪资面议')}</span><span>${escapeHtml(job.city)}</span><span>${escapeHtml(job.education || '学历不限')}</span></div>
+      <div class="job-card-head"><div class="job-company"><div class="company-logo">${escapeHtml(String(job.company || '岗').slice(0,1))}</div><div><h3>${escapeHtml(job.title)}</h3><p>${escapeHtml(job.company)} · ${escapeHtml(job.experience || '经验未标注')}</p></div></div><div class="match-badge"><span class="score-source rule">规则参考</span><strong>${item.matchScore}%</strong><span>${escapeHtml(item.matchLevel)}</span></div></div>
+      <div class="job-meta"><span class="salary">${escapeHtml(job.salary || '薪资面议')}</span><span>${escapeHtml(job.city)}</span><span>${escapeHtml(job.education || '学历未标注')}</span></div>
       <div class="job-skills">${skills}</div>
       <div class="job-requirement-preview"><div><span>岗位职责 ${job.contentOrigin === 'AI_GENERATED' ? '<i class="ai-badge">AI生成</i>' : ''}</span><p>${escapeHtml(dutyPreview || '暂无职责摘要')}</p></div><div><span>任职要求 ${job.contentOrigin === 'AI_GENERATED' ? '<i class="ai-badge">AI生成</i>' : ''}</span><p>${escapeHtml(reqPreview || '暂无要求摘要')}</p></div></div>
       <div class="job-reasons">${reasons}</div>
       <span class="source-tag">${escapeHtml(job.source || '本地岗位源')}</span>
-      <div class="job-card-foot"><button class="ghost-button" data-job-action="detail" data-job-id="${job.id}">岗位详情</button><button class="primary-button" data-job-action="diagnose" data-job-id="${job.id}">诊断匹配</button><button class="primary-button" data-job-action="interview" data-job-id="${job.id}">模拟面试</button></div>
+      <div class="job-card-foot"><button class="ghost-button" data-job-action="detail" data-job-id="${job.id}">岗位详情</button><button class="primary-button" data-job-action="interview" data-job-id="${job.id}">模拟面试</button></div>
     </article>`;
   }).join('');
   const footer = `<div class="city-jobs-footer panel"><div><strong>${escapeHtml($('#job-city-filter')?.value || '')}</strong><span>已显示 ${shown} / ${total} 个岗位</span></div>${shown < total ? `<button type="button" class="primary-button" data-city-action="more" ${state.cityLoading?'disabled':''}>${state.cityLoading?'加载中...':'加载更多岗位'}</button>` : '<span class="city-jobs-complete">已显示该城市全部岗位</span>'}</div>`;
@@ -1394,8 +1687,8 @@ async function renderJobs() {
       : (item.reasons || []);
     const level = agent?.verdict || item.matchLevel || scoreLevel(score);
     return `<article class="panel job-card" data-job="${job.id}">
-      <div class="job-card-head"><div class="job-company"><div class="company-logo">${escapeHtml(String(job.company || '岗').slice(0,1))}</div><div><h3>${escapeHtml(job.title)}</h3><p>${escapeHtml(job.company)} · ${escapeHtml(job.experience || '经验不限')}</p></div></div><div class="match-badge"><span class="score-source ${agent?'agent':'rule'}">${agent?'AGENT适配':'规则参考'}</span><strong>${score}%</strong><span>${escapeHtml(level)}</span></div></div>
-      <div class="job-meta"><span class="salary">${escapeHtml(job.salary || '薪资面议')}</span><span>${escapeHtml(job.city)}</span><span>${escapeHtml(job.education || '学历不限')}</span></div>
+      <div class="job-card-head"><div class="job-company"><div class="company-logo">${escapeHtml(String(job.company || '岗').slice(0,1))}</div><div><h3>${escapeHtml(job.title)}</h3><p>${escapeHtml(job.company)} · ${escapeHtml(job.experience || '经验未标注')}</p></div></div><div class="match-badge"><span class="score-source ${agent?'agent':'rule'}">${agent?'AGENT适配':'规则参考'}</span><strong>${score}%</strong><span>${escapeHtml(level)}</span></div></div>
+      <div class="job-meta"><span class="salary">${escapeHtml(job.salary || '薪资面议')}</span><span>${escapeHtml(job.city)}</span><span>${escapeHtml(job.education || '学历未标注')}</span></div>
       <div class="job-skills">${skills}</div>
       <div class="job-requirement-preview">
         <div><span>岗位职责 ${job.contentOrigin === 'AI_GENERATED' ? '<i class="ai-badge">AI生成</i>' : ''}</span><p>${escapeHtml(dutyPreview || '暂无职责摘要')}</p></div>
@@ -1404,7 +1697,7 @@ async function renderJobs() {
       <div class="job-reasons">${reasons.slice(0,4).map(reason => `<span>• ${escapeHtml(reason)}</span>`).join('')}</div>
       <div class="score-breakdown ${agent?'agent-breakdown':''}">${breakdown}</div>
       <span class="source-tag">${escapeHtml(job.source || '本地岗位源')}</span>
-      <div class="job-card-foot"><button class="ghost-button" data-job-action="detail" data-job-id="${job.id}">岗位详情</button><button class="primary-button" data-job-action="diagnose" data-job-id="${job.id}">诊断匹配</button><button class="primary-button" data-job-action="interview" data-job-id="${job.id}">模拟面试</button></div>
+      <div class="job-card-foot"><button class="ghost-button" data-job-action="detail" data-job-id="${job.id}">岗位详情</button><button class="primary-button" data-job-action="interview" data-job-id="${job.id}">模拟面试</button></div>
     </article>`;
   }).join('');
 }
@@ -1440,7 +1733,7 @@ async function openJobModal(jobId) {
     <h3 style="margin-top:20px">岗位职责 ${job.contentOrigin === 'AI_GENERATED' ? '<span class="ai-badge">AI生成</span>' : ''}</h3><div class="job-description" style="white-space:pre-wrap">${escapeHtml(job.jobDescription || job.description || '暂无岗位职责')}</div>
     <h3 style="margin-top:20px">任职要求 ${job.contentOrigin === 'AI_GENERATED' ? '<span class="ai-badge">AI生成</span>' : ''}</h3><div class="job-description" style="white-space:pre-wrap">${escapeHtml(job.jobRequirements || '暂无结构化任职要求')}</div>
     <div id="job-similar-box" class="job-similar-box"><h3>相似岗位</h3><div class="empty-mini">正在查找同方向岗位...</div></div>
-    <div class="job-card-foot"><button class="primary-button" data-job-action="diagnose" data-job-id="${job.id}">用此岗位诊断</button><button class="primary-button" data-job-action="interview" data-job-id="${job.id}">开始模拟面试</button></div>`;
+    <div class="job-card-foot"><button class="primary-button" data-job-action="interview" data-job-id="${job.id}">开始模拟面试</button></div>`;
   $('#job-modal').classList.add('open'); $('#job-modal').setAttribute('aria-hidden','false');
   try {
     const similar = await api(`/api/jobs/${job.id}/similar?limit=4`);
@@ -1468,16 +1761,125 @@ async function refreshJobs() {
   } catch (error) { toast('刷新失败',error.message,true); }
 }
 
-/* interview */
+/* project interview */
+async function generateProjectQuestions(event) {
+  event.preventDefault();
+  const button = $('#generate-project-questions');
+  const description = $('#project-description').value.trim();
+  const file = $('#project-zip-file').files?.[0];
+  if (file && (!file.name.toLowerCase().endsWith('.zip') || file.size > 5000000)) {
+    toast('请选择 ZIP', '请上传不超过 5 MB 的 .zip 项目源码包', true); return;
+  }
+  if (!file && !$('#project-repo-url').value.trim()) {
+    toast('请填写仓库地址', '请输入公开 GitHub 仓库地址', true); return;
+  }
+  button.disabled = true;
+  $('#project-question-result').innerHTML = '<div class="panel project-question-empty">正在读取仓库、分析源码并生成问题，可能需要几十秒…</div>';
+  try {
+    let result;
+    if (file) {
+      const body = new FormData();
+      body.append('file', file); body.append('projectDescription', description);
+      result = await api('/api/project-questions/upload', { method:'POST', headers:{}, body });
+    } else {
+      result = await post('/api/project-questions', {
+        repoUrl: $('#project-repo-url').value.trim(), projectDescription: description
+      });
+    }
+    state.projectQuestionSet = result;
+    state.projectQuestionDescription = description;
+    state.projectQuestionStatus = {};
+    state.projectAnswers = {};
+    state.projectFollowUps = {};
+    state.projectFollowUpLoading = {};
+    renderProjectQuestions();
+    toast('项目问题已生成', `${result.questions.length} 道问题，解析 ${result.analyzedFiles} 个 Java 文件`);
+  } catch (error) {
+    $('#project-question-result').innerHTML = `<div class="panel project-question-error">${escapeHtml(error.message)}</div>`;
+  } finally { button.disabled = false; }
+}
+
+function renderProjectQuestions() {
+  const result = state.projectQuestionSet;
+  if (!result) return;
+  const dimensions = [...new Set(result.questions.map(question => question.dimension))];
+  const groups = dimensions.map(dimension => {
+    const questions = result.questions.filter(question => question.dimension === dimension);
+    const visible = questions.filter(question => !question.parentId || state.projectQuestionStatus[question.parentId] === 'asked');
+    return `<section class="panel project-question-group"><div class="panel-head"><h3>${escapeHtml(dimension)}</h3><span>${visible.length} / ${questions.length} 题</span></div>
+      ${visible.map(question => {
+        const evidence = question.evidence;
+        const status = state.projectQuestionStatus[question.id] || '';
+        const followUp = state.projectFollowUps[question.id];
+        const loading = state.projectFollowUpLoading[question.id];
+        const link = String(evidence.url || '').startsWith('https://github.com/') ? evidence.url : '#';
+        return `<article class="project-question-card ${status}">
+          <div class="project-question-top"><span>第 ${question.depth} 层 · ${escapeHtml(question.id)}</span><span>${status === 'asked' ? '已问' : status === 'skipped' ? '已跳过' : '待提问'}</span></div>
+          <h4>${escapeHtml(question.question)}</h4>
+          <div class="project-question-signal"><b>考察信号</b>${escapeHtml(question.signal)}</div>
+          ${link === '#' ? `<span class="project-evidence-path">ZIP 内文件 · ${escapeHtml(evidence.path)}:${evidence.startLine}–${evidence.endLine} · ${escapeHtml(evidence.symbol)}</span>` : `<a href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(evidence.path)}:${evidence.startLine}–${evidence.endLine} · ${escapeHtml(evidence.symbol)} ↗</a>`}
+          <details><summary>查看源码证据</summary><pre>${escapeHtml(evidence.snippet)}</pre></details>
+          <details><summary>回答核查点</summary><ul>${(question.answerChecks || []).map(check => `<li>${escapeHtml(check)}</li>`).join('')}</ul></details>
+          <label class="project-answer-label">候选人的回答<textarea data-project-answer="${escapeHtml(question.id)}" maxlength="2000" rows="3" placeholder="记录真实回答，再根据回答继续追问…">${escapeHtml(state.projectAnswers[question.id] || '')}</textarea></label>
+          <button type="button" class="ghost-button project-followup-button" data-project-followup="${escapeHtml(question.id)}" ${loading ? 'disabled' : ''}>${loading ? '正在生成追问…' : '根据回答建议追问'}</button>
+          ${followUp ? `<div class="project-followup"><strong>建议追问 · ${escapeHtml(followUp.generationMode)}</strong><p>${escapeHtml(followUp.question)}</p><small>${escapeHtml(followUp.reason)}</small></div>` : ''}
+          <div class="project-question-actions"><button type="button" class="ghost-button" data-project-id="${escapeHtml(question.id)}" data-project-status="asked">已问，继续追问</button><button type="button" class="ghost-button" data-project-id="${escapeHtml(question.id)}" data-project-status="skipped">跳过</button></div>
+        </article>`;
+      }).join('')}</section>`;
+  }).join('');
+  const sourceVersion = result.repoUrl.startsWith('upload:') ? `ZIP 指纹 ${result.sha.slice(0, 10)}` : `commit ${result.sha.slice(0, 10)}`;
+  $('#project-question-result').innerHTML = `<div class="project-question-summary"><strong>${result.questions.length} 道源码问题</strong><span>解析 ${result.analyzedFiles} 个 Java 文件 · ${escapeHtml(result.generationMode)} · ${escapeHtml(sourceVersion)}</span></div>${groups}`;
+}
+
+async function suggestProjectFollowUp(id) {
+  const set = state.projectQuestionSet;
+  if (!set || state.projectFollowUpLoading[id]) return;
+  const answer = (state.projectAnswers[id] || '').trim();
+  if (answer.length < 8) { toast('回答太短', '请先记录至少 8 个字的回答', true); return; }
+  state.projectFollowUpLoading[id] = true;
+  renderProjectQuestions();
+  try {
+    state.projectFollowUps[id] = await post('/api/project-questions/follow-up', {
+      repoUrl: set.repoUrl, sha: set.sha, projectDescription: state.projectQuestionDescription,
+      questionId: id, answer
+    });
+  } catch (error) { toast('追问生成失败', error.message, true); }
+  finally { delete state.projectFollowUpLoading[id]; renderProjectQuestions(); }
+}
+
+function markProjectQuestion(id, status) {
+  const set = state.projectQuestionSet;
+  if (!set || !set.questions.some(question => question.id === id)) return;
+  state.projectQuestionStatus[id] = status;
+  if (status === 'skipped') {
+    for (const question of set.questions) {
+      if (question.id.startsWith(id.slice(0, 2)) && question.depth > Number(id.slice(-1))) delete state.projectQuestionStatus[question.id];
+    }
+  }
+  renderProjectQuestions();
+}
+
+/* standalone interview workspace */
 async function startInterview(jobId) {
   const resumeId = Number($('#interview-resume').value || state.activeResumeId);
-  const selectedJob = Number(jobId || $('#interview-job').value || state.activeJobId);
-  if (!resumeId || !selectedJob) { toast('无法开始','请先准备简历并选择岗位',true); return; }
+  const selectedJob = Number(jobId || $('#interview-job').value || 0);
+  if (!resumeId) { toast('无法开始','请先选择简历',true); return; }
+  if (!selectedJob) { toast('请选择目标岗位','不选择岗位不能开始模拟面试',true); return; }
+  resetInterviewWorkspace('正在创建面试');
+  navigate('interview');
+  $('#interview-status').textContent = '正在创建面试';
+  $('#interview-status').className = 'session-status live';
+  $('#interview-resume-label').textContent = interviewResumeLabel(resumeId);
+  $('#interview-job-label').textContent = interviewJobLabel(selectedJob);
+  renderInterviewJobFocus(selectedJob);
+  $('#chat-job-title').textContent = interviewJobLabel(selectedJob);
+  $('#chat-messages').innerHTML = '<div class="loading-card"><i></i>Agent 正在读取岗位技能与简历项目，准备第一轮基础概念题...</div>';
   try {
     state.activeResumeId = resumeId; state.activeJobId = selectedJob;
     $('#interview-resume').value = resumeId; $('#interview-job').value = selectedJob;
     state.interview = await post('/api/interviews', { resumeId, jobId:selectedJob, difficulty:state.difficulty });
-    renderInterview(state.interview); navigate('interview'); toast('Agent 面试已开始','请用 STAR 结构回答，AI 面试官会根据你的回答动态追问');
+    renderInterview(state.interview);
+    toast('模拟面试已开始','五轮回答会形成技能证据；完成后面试页内解锁简历诊断');
   } catch (error) { toast('创建失败',error.message,true); }
 }
 function renderInterview(session) {
@@ -1486,6 +1888,9 @@ function renderInterview(session) {
   $('#interview-status').textContent = session.status === 'COMPLETED' ? '面试已完成' : `第 ${session.currentRound} 轮进行中`;
   $('#interview-status').className = `session-status ${session.status === 'COMPLETED' ? 'done' : 'live'}`;
   $('#chat-job-title').textContent = session.jobTitle;
+  $('#interview-resume-label').textContent = interviewResumeLabel(session.resumeId);
+  $('#interview-job-label').textContent = interviewJobLabel(session.jobId);
+  renderInterviewJobFocus(session.jobId);
   const progress = Math.round((session.status === 'COMPLETED' ? session.totalRounds : session.currentRound - 1) / session.totalRounds * 100);
   $('#round-text').textContent = `${session.status === 'COMPLETED' ? session.totalRounds : session.currentRound} / ${session.totalRounds}`;
   $('#round-bar').style.width = `${progress}%`;
@@ -1496,6 +1901,11 @@ function renderInterview(session) {
     return `<div class="message ${isUser?'user':''}"><div class="message-avatar">${isUser?'我':'AI'}</div><div class="message-body"><p>${escapeHtml(message.content)}</p><div class="message-meta">${time} ${score}</div></div></div>`;
   }).join('');
   messages.scrollTop = messages.scrollHeight;
+  if (session.status === 'COMPLETED') {
+    messages.insertAdjacentHTML('beforeend', `<div class="interview-complete-card"><div><span class="eyebrow">INTERVIEW COMPLETED</span><h4>本场面试已完成</h4><p>只有完成本场面试后，页面才会开放简历诊断。未面试或重新开始后不会保留旧诊断分。</p></div><button type="button" class="primary-button" id="generate-interview-diagnosis">生成简历诊断</button></div>`);
+    $('#generate-interview-diagnosis')?.addEventListener('click', runInterviewDiagnosis);
+    $('#interview-diagnosis-panel').hidden = false;
+  }
   $('#send-answer').disabled = session.status === 'COMPLETED';
   $('#interview-answer').disabled = session.status === 'COMPLETED';
 }
@@ -1510,23 +1920,73 @@ async function sendInterviewAnswer() {
 }
 
 /* diagnosis */
-async function runDiagnosis(jobId) {
-  const resumeId = Number($('#diagnosis-resume').value || state.activeResumeId);
-  const selectedJob = Number(jobId || $('#diagnosis-job').value || state.activeJobId);
-  if (!resumeId) { toast('无法诊断','请先保存一份简历',true); return; }
-  const target = $('#diagnosis-content');
-  target.innerHTML = '<div class="loading-card"><i></i>Agent 正在分别计算简历质量与岗位匹配，并生成可解释评分...</div>';
-  try {
-    state.activeResumeId = resumeId; if (selectedJob) state.activeJobId = selectedJob;
-    const report = await post('/api/diagnoses', { resumeId, jobId:selectedJob || null });
-    state.diagnosis = report; renderDiagnosis(report);
-    toast('Agent 诊断完成', `综合 ${report.overallScore} 分 · 简历质量 ${report.resumeQualityScore} 分 · 岗位匹配 ${report.jobMatchScore ?? '--'} 分`);
-  } catch (error) { toast('诊断失败',error.message,true); renderDiagnosis(state.diagnosis); }
+async function runInterviewDiagnosis() {
+  const session = state.interview;
+  if (!session || session.status !== 'COMPLETED') {
+    toast('还不能诊断', '必须先完成当前岗位的五轮模拟面试', true);
+    return;
+  }
+  const panel = $('#interview-diagnosis-panel');
+  if (panel) panel.hidden = false;
+  await runDiagnosis(session.jobId);
 }
-function renderDiagnosis(report) {
-  const target = $('#diagnosis-content'); if (!target) return;
-  if (!report) { target.className = 'diagnosis-empty panel'; return; }
-  target.className = 'panel'; state.diagnosis = report;
+async function runDiagnosis(jobId) {
+  const session = state.interview;
+  if (!session || session.status !== 'COMPLETED') {
+    toast('无法诊断', '请先完成本场模拟面试', true);
+    return;
+  }
+  const resumeId = Number(session.resumeId);
+  const selectedJob = Number(jobId || session.jobId);
+  if (!resumeId || !selectedJob || selectedJob !== Number(session.jobId)) {
+    toast('岗位不匹配', '诊断岗位必须与当前面试岗位一致', true);
+    return;
+  }
+  const panel = $('#interview-diagnosis-panel');
+  const target = $('#interview-diagnosis-content');
+  if (panel) panel.hidden = false;
+  if (target) target.innerHTML = '<div class="loading-card"><i></i>面试已完成，Agent 正在结合面试证据计算简历质量、岗位适配度和综合竞争力...</div>';
+  try {
+    const evidence = await loadInterviewEvidence(resumeId, selectedJob);
+    if (!evidence.length) throw new Error('本场面试证据尚未写入，请稍后重试');
+    const report = await post('/api/diagnoses', { resumeId, jobId: selectedJob });
+    state.activeResumeId = resumeId; state.activeJobId = selectedJob;
+    state.diagnosis = report; renderDiagnosis(report);
+    panel?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    toast('面试后诊断完成', `综合 ${report.overallScore} 分 · 简历质量 ${report.resumeQualityScore} 分 · 岗位匹配 ${report.jobMatchScore ?? '--'} 分`);
+  } catch (error) {
+    if (target) target.innerHTML = `<div class="gd-error">简历诊断失败：${escapeHtml(error.message)}</div>`;
+    toast('诊断失败', error.message, true);
+  }
+}
+async function runDiagnosisPage() {
+  const resumeId = Number($('#diagnosis-resume')?.value || state.activeResumeId);
+  const jobId = Number($('#diagnosis-job')?.value || 0);
+  if (!resumeId || !jobId) { renderDiagnosisLocked('请选择简历和目标岗位。'); return; }
+  const evidence = await loadInterviewEvidence(resumeId, jobId);
+  if (!evidence.length) {
+    renderDiagnosisLocked('当前简历和岗位没有已完成面试，不能生成诊断。');
+    toast('诊断仍未解锁', '请先完成该岗位的五轮模拟面试', true);
+    return;
+  }
+  const target = $('#diagnosis-content');
+  if (target) target.innerHTML = '<div class="loading-card"><i></i>正在结合本场面试证据生成简历诊断...</div>';
+  try {
+    const report = await post('/api/diagnoses', { resumeId, jobId });
+    state.activeResumeId = resumeId;
+    state.activeJobId = jobId;
+    state.diagnosis = report;
+    renderDiagnosis(report, '#diagnosis-content');
+    toast('简历诊断生成完成', `综合竞争力 ${report.overallScore} 分 · 岗位适配度 ${report.jobMatchScore ?? '--'} 分`);
+  } catch (error) {
+    renderDiagnosisLocked(error.message);
+    toast('诊断失败', error.message, true);
+  }
+}
+function renderDiagnosis(report, targetSelector='#interview-diagnosis-content') {
+  const target = $(targetSelector); if (!target) return;
+  if (!report) { target.innerHTML = ''; return; }
+  state.diagnosis = report;
   const qualityScore = report.resumeQualityScore ?? report.overallScore;
   const matchScore = report.jobMatchScore ?? null;
   const ruleScore = report.ruleMatchScore ?? null;
@@ -1547,11 +2007,11 @@ function renderDiagnosis(report) {
   const matchFocus = agentEvidence || ruleFocus;
   const ruleBreakdown = (report.jobMatchBreakdown || []).filter(item => item.weight > 0).map(item => `<span title="${escapeHtml(item.detail || '')}">${escapeHtml(item.label)} <b>${item.contribution}</b></span>`).join('');
   const scoreSources = matchScore === null ? '' : `<div class="diagnosis-source-row"><span class="match-source ${source === 'AGENT' ? 'agent' : 'rule'}">${escapeHtml(sourceLabel)}</span><span>岗位适配度 <b>${matchScore}</b></span><span>默认规则 <b>${ruleScore ?? '--'}</b></span><span>Agent 调权结果 <b>${agentScore ?? '--'}</b></span></div>`;
-  target.innerHTML = `<div class="report-head"><div class="diagnosis-score-stack"><div class="big-score-ring" style="--score:${report.overallScore}"><div><strong>${report.overallScore}</strong><span>综合竞争力</span></div></div><div class="score-split"><div><strong>${qualityScore}</strong><span>简历质量</span></div><div><strong>${matchScore ?? '--'}</strong><span>岗位适配度</span><small>${escapeHtml(report.jobMatchLevel || '未选择岗位')}</small></div></div></div><div class="report-overview"><div class="report-title"><h2>${escapeHtml(report.targetRole)}</h2><span class="report-level">${escapeHtml(report.level)}</span></div><p class="report-summary">${escapeHtml(report.summary)}</p><div class="score-formula">${escapeHtml(formula)}</div>${scoreSources}${ruleBreakdown ? `<div class="score-breakdown"><span class="score-breakdown-label">${source === 'AGENT' ? 'Agent 受限调权明细' : '规则基线明细'}</span>${ruleBreakdown}</div>` : ''}<div class="keyword-row">${matched}${missing}</div><div class="strength-row">${(report.strengths || []).map(item => `<span>✦ ${escapeHtml(item)}</span>`).join('')}</div></div></div><div class="score-explain"><div class="explain-head"><span class="eyebrow">WHY THIS SCORE</span><h3>为什么是这个分数</h3></div><div class="explain-grid"><div><h4>简历质量主要失分项</h4>${qualityFocus}</div><div><h4>岗位适配依据</h4>${matchFocus || '<p class="explain-empty">未选择岗位或岗位数据不足</p>'}</div></div></div><div class="report-body"><div class="dimension-block"><span class="eyebrow">RESUME QUALITY</span><h3>简历质量维度</h3><div class="dimension-list">${dimensions}</div></div><div class="suggestion-block"><span class="eyebrow">ACTION PRIORITY</span><h3>修改行动清单</h3><div class="suggestion-list">${suggestions}</div></div></div>` + renderLearningPlanBlock(report) + renderAgentTraceBlock(report);
+  target.innerHTML = renderInterviewEvidenceBlock(report) + `<div class="report-head"><div class="diagnosis-score-stack"><div class="big-score-ring" style="--score:${report.overallScore}"><div><strong>${report.overallScore}</strong><span>综合竞争力</span></div></div><div class="score-split"><div><strong>${qualityScore}</strong><span>简历质量</span></div><div><strong>${matchScore ?? '--'}</strong><span>岗位适配度</span><small>${escapeHtml(report.jobMatchLevel || '未选择岗位')}</small></div></div></div><div class="report-overview"><div class="report-title"><h2>${escapeHtml(report.targetRole)}</h2><span class="report-level">${escapeHtml(report.level)}</span></div><p class="report-summary">${escapeHtml(report.summary)}</p><div class="score-formula">${escapeHtml(formula)}</div>${scoreSources}${ruleBreakdown ? `<div class="score-breakdown"><span class="score-breakdown-label">${source === 'AGENT' ? 'Agent 受限调权明细' : '规则基线明细'}</span>${ruleBreakdown}</div>` : ''}<div class="keyword-row">${matched}${missing}</div><div class="strength-row">${(report.strengths || []).map(item => `<span>✦ ${escapeHtml(item)}</span>`).join('')}</div></div></div><div class="score-explain"><div class="explain-head"><span class="eyebrow">WHY THIS SCORE</span><h3>为什么是这个分数</h3></div><div class="explain-grid"><div><h4>简历质量主要失分项</h4>${qualityFocus}</div><div><h4>岗位适配依据</h4>${matchFocus || '<p class="explain-empty">未选择岗位或岗位数据不足</p>'}</div></div></div><div class="report-body"><div class="dimension-block"><span class="eyebrow">RESUME QUALITY</span><h3>简历质量维度</h3><div class="dimension-list">${dimensions}</div></div><div class="suggestion-block"><span class="eyebrow">ACTION PRIORITY</span><h3>修改行动清单</h3><div class="suggestion-list">${suggestions}</div></div></div>` + renderLearningPlanBlock(report) + renderAgentTraceBlock(report);
 }
 /* job recommendation agent */
 async function runJobAgent() {
-  const resumeId = Number($('#diagnosis-resume').value || state.activeResumeId);
+  const resumeId = Number($('#interview-resume')?.value || state.activeResumeId);
   if (!resumeId) { toast('无法推荐','请先保存一份简历',true); return; }
   const resume = state.resumes.find(item => item.id === resumeId) || {};
   const city = resume.city || '';
@@ -1655,7 +2115,6 @@ document.addEventListener('click', async event => {
   const similarBtn = event.target.closest('[data-similar-job]');
   if (similarBtn) openJobModal(Number(similarBtn.dataset.similarJob));
     if (action.dataset.jobAction === 'interview') { closeJobModal(); await startInterview(jobId); }
-    if (action.dataset.jobAction === 'diagnose') { closeJobModal(); $('#diagnosis-resume').value = state.activeResumeId; $('#diagnosis-job').value = jobId; navigate('diagnosis'); await runDiagnosis(jobId); }
     return;
   }
   const template = event.target.closest('[data-resume-template]');
@@ -1695,10 +2154,12 @@ $('#resume-library-grid').addEventListener('click', event => {
 });
 $('#save-version').addEventListener('click', event => { event.preventDefault(); saveVersion(); });
 $('#open-guidance').addEventListener('click', event => { event.preventDefault(); openGuidance(); });
+$('#open-resume-import').addEventListener('click', event => { event.preventDefault(); openResumeImport(); });
+$('#resume-import-modal').addEventListener('click', event => {
+  if (event.target.closest('[data-close-resume-import]') || event.target.id === 'resume-import-modal') closeResumeImport();
+});
 $('#open-ats').addEventListener('click', event => { event.preventDefault(); openAts(); });
 $('#ats-modal').addEventListener('click', event => { if (event.target.closest('[data-close-ats]') || event.target.id === 'ats-modal') closeAts(); });
-$('#verify-java-skill').addEventListener('click', event => { event.preventDefault(); openJavaSkillTest(); });
-$('#skill-test-modal').addEventListener('click', event => { if (event.target.closest('[data-close-skill-test]') || event.target.id === 'skill-test-modal') closeJavaSkillTest(); });
 $('#guidance-modal').addEventListener('click', event => {
   if (event.target.closest('[data-close-guidance]') || event.target.id === 'guidance-modal') closeGuidance();
 });
@@ -1710,6 +2171,10 @@ $('#fact-locks').addEventListener('change', saveFactLocks);
 $('#resume-form').addEventListener('submit', event => { event.preventDefault(); saveResume(); });
 $('#resume-form').addEventListener('input', updateResumePreview);
 $('#resume-form').addEventListener('change', updateResumePreview);
+$('#education-proof-result').addEventListener('click', event => {
+  if (event.target.closest('[data-fill-education]')) { fillEducationFromProof(); return; }
+  if (event.target.closest('[data-cancel-education-verification]')) { cancelEducationVerification(); return; }
+});
 $('#upload-education-proof').addEventListener('click', () => $('#education-proof-file').click());
 $('#education-proof-file').addEventListener('change', event => {
   const file = event.target.files?.[0];
@@ -1742,16 +2207,68 @@ $('#job-list').addEventListener('click', event => {
   const more = event.target.closest('[data-city-action="more"]');
   if (more) loadCityJobs(false);
 });
-$('#start-interview').addEventListener('click', () => startInterview());
+$('#project-question-form').addEventListener('submit', generateProjectQuestions);
+$('#project-question-result').addEventListener('click', event => {
+  const followUp = event.target.closest('[data-project-followup]');
+  if (followUp) { suggestProjectFollowUp(followUp.dataset.projectFollowup); return; }
+  const button = event.target.closest('[data-project-id]');
+  if (button) markProjectQuestion(button.dataset.projectId, button.dataset.projectStatus);
+});
+$('#project-question-result').addEventListener('input', event => {
+  const field = event.target.closest('[data-project-answer]');
+  if (field) {
+    state.projectAnswers[field.dataset.projectAnswer] = field.value;
+    delete state.projectFollowUps[field.dataset.projectAnswer];
+  }
+});
 $('#send-answer').addEventListener('click', sendInterviewAnswer);
 $('#interview-answer').addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendInterviewAnswer(); } });
-$('#interview-difficulty').addEventListener('click', event => { const button = event.target.closest('button'); if (!button) return; state.difficulty = button.dataset.value; $$('#interview-difficulty button').forEach(item => item.classList.toggle('active', item === button)); });
-$('#run-diagnosis').addEventListener('click', () => runDiagnosis());
-$('#run-job-agent').addEventListener('click', () => runJobAgent());
+$('#start-interview').addEventListener('click', () => startInterview());
+$('#run-interview-diagnosis').addEventListener('click', runInterviewDiagnosis);
+$('#diagnosis-content').addEventListener('click', event => {
+  if (event.target.closest('[data-run-page-diagnosis]')) { runDiagnosisPage(); return; }
+  const goInterview = event.target.closest('[data-go-diagnosis-interview]');
+  if (goInterview) {
+    const resumeId = Number($('#diagnosis-resume')?.value || state.activeResumeId);
+    const jobId = Number($('#diagnosis-job')?.value || 0);
+    state.activeResumeId = resumeId || state.activeResumeId;
+    state.activeJobId = jobId || state.activeJobId;
+    populateAllSelects();
+    if (resumeId) $('#interview-resume').value = String(resumeId);
+    if (jobId) $('#interview-job').value = String(jobId);
+    navigate('interview');
+  }
+});
+$('#diagnosis-resume').addEventListener('change', event => {
+  state.activeResumeId = Number(event.target.value);
+  populateDiagnosisOptions();
+});
+$('#diagnosis-job').addEventListener('change', event => {
+  state.activeJobId = Number(event.target.value) || null;
+  populateDiagnosisOptions();
+});
+$('#interview-difficulty').addEventListener('click', event => {
+  const button = event.target.closest('button'); if (!button) return;
+  state.difficulty = button.dataset.value;
+  $$('#interview-difficulty button').forEach(item => item.classList.toggle('active', item === button));
+});
+$('#interview-resume').addEventListener('change', event => {
+  state.activeResumeId = Number(event.target.value);
+  $('#interview-resume-label').textContent = interviewResumeLabel(state.activeResumeId);
+  resetInterviewWorkspace('简历已切换');
+});
+$('#interview-job').addEventListener('change', event => {
+  state.activeJobId = Number(event.target.value) || null;
+  $('#interview-job-label').textContent = state.activeJobId ? interviewJobLabel(state.activeJobId) : '请选择目标岗位';
+  renderInterviewJobFocus(state.activeJobId);
+  resetInterviewWorkspace(state.activeJobId ? '岗位已选择，等待开始面试' : '尚未选择岗位');
+});
+$('#interview-diagnosis-panel').addEventListener('click', event => {
+  if (event.target.closest('[data-restart-interview]')) { resetInterviewWorkspace('等待开始新面试'); return; }
+  if (event.target.closest('[data-open-project-interview]')) { navigate('project-questions'); }
+});
 $('#run-agent-top').addEventListener('click', runAgentWorkflow);
 $('#run-agent-hero').addEventListener('click', runAgentWorkflow);
 $('#workflow-run').addEventListener('click', runAgentWorkflow);
-$('#interview-resume').addEventListener('change', event => { state.activeResumeId = Number(event.target.value); $('#diagnosis-resume').value = event.target.value; });
-$('#diagnosis-resume').addEventListener('change', event => { state.activeResumeId = Number(event.target.value); $('#interview-resume').value = event.target.value; });
 
 boot();

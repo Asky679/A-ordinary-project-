@@ -17,6 +17,14 @@ public class ResumeEntity {
     private String school;
     private String major;
     private Integer graduationYear;
+    private String educationCategory;
+    private String duration;
+    private String studyMode;
+    private String college;
+    private String department;
+    private String enrollmentDate;
+    private String studentStatus;
+    private String expectedGraduationDate;
     @Column(columnDefinition = "text") private String skillsJson;
     @Column(columnDefinition = "text") private String projectsJson;
     @Column(columnDefinition = "text") private String experiencesJson;
@@ -37,6 +45,14 @@ public class ResumeEntity {
     public String getSchool() { return school; } public void setSchool(String v) { school = v; }
     public String getMajor() { return major; } public void setMajor(String v) { major = v; }
     public Integer getGraduationYear() { return graduationYear; } public void setGraduationYear(Integer v) { graduationYear = v; }
+    public String getEducationCategory() { return educationCategory; } public void setEducationCategory(String v) { educationCategory = v; }
+    public String getDuration() { return duration; } public void setDuration(String v) { duration = v; }
+    public String getStudyMode() { return studyMode; } public void setStudyMode(String v) { studyMode = v; }
+    public String getCollege() { return college; } public void setCollege(String v) { college = v; }
+    public String getDepartment() { return department; } public void setDepartment(String v) { department = v; }
+    public String getEnrollmentDate() { return enrollmentDate; } public void setEnrollmentDate(String v) { enrollmentDate = v; }
+    public String getStudentStatus() { return studentStatus; } public void setStudentStatus(String v) { studentStatus = v; }
+    public String getExpectedGraduationDate() { return expectedGraduationDate; } public void setExpectedGraduationDate(String v) { expectedGraduationDate = v; }
     public String getSkillsJson() { return skillsJson; } public void setSkillsJson(String v) { skillsJson = v; }
     public String getProjectsJson() { return projectsJson; } public void setProjectsJson(String v) { projectsJson = v; }
     public String getExperiencesJson() { return experiencesJson; } public void setExperiencesJson(String v) { experiencesJson = v; }

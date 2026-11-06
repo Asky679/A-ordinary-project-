@@ -1,9 +1,8 @@
-$root = "D:\何处是家乡\new pj"
-$agent = Join-Path $root "interview-agent"
+$agent = Split-Path -Parent $MyInvocation.MyCommand.Path
 $python = Join-Path $agent ".venv\Scripts\python.exe"
 $envFile = Join-Path $agent ".env"
 if (-not (Test-Path -LiteralPath $python)) {
-    throw "Python venv not found. Run: python -m venv $agent\.venv and install requirements.txt"
+    throw "Python venv not found. Create it under the interview-agent directory and install requirements.txt"
 }
 if (Test-Path -LiteralPath $envFile) {
     Get-Content -Encoding UTF8 -LiteralPath $envFile | ForEach-Object {

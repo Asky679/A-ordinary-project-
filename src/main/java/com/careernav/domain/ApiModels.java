@@ -12,7 +12,11 @@ public final class ApiModels {
     private ApiModels() {}
 
     public record ProjectItem(@NotBlank(message = "项目名称不能为空") String name, String role,
-                              String techStack, String description, String highlight) {}
+                              String techStack, String description, String challenge, String highlight) {
+        public ProjectItem(String name, String role, String techStack, String description, String highlight) {
+            this(name, role, techStack, description, null, highlight);
+        }
+    }
 
     public record ExperienceItem(String company, String position, String period,
                                  String description, String achievement) {}
@@ -21,9 +25,20 @@ public final class ApiModels {
                                 @NotBlank(message = "目标岗位不能为空") String targetRole,
                                 String city, String phone, String email, String education,
                                 String school, String major, Integer graduationYear,
+                                String educationCategory, String duration, String studyMode,
+                                String college, String department, String enrollmentDate,
+                                String studentStatus, String expectedGraduationDate,
                                 List<String> skills, @Valid List<ProjectItem> projects,
                                 @Valid List<ExperienceItem> experiences,
                                 String selfEvaluation, String rawText) {}
+
+    /** OCR / PDF 导入草稿：只回填编辑器，用户确认后才写入简历仓库。 */
+    public record ResumeImportResult(String ownerName, String targetRole, String city, String phone,
+                                     String email, String education, String school, String major,
+                                     Integer graduationYear, List<String> skills,
+                                     List<ProjectItem> projects, List<ExperienceItem> experiences,
+                                     String selfEvaluation, String rawText, String extractionMethod,
+                                     int confidence, List<String> warnings, boolean needsReview) {}
 
     /** 创建简历版本：label 为版本类型，targetJobId 可选（用于绑定当时的岗位与匹配分）。 */
     /** ---------- Agent 岗位匹配 ---------- */
@@ -61,6 +76,15 @@ public final class ApiModels {
                                                boolean officialReportDetected, String proofFileType,
                                                String proofHash, String extractionMode, String summary,
                                                List<EducationVerificationCheck> checks,
+                                               boolean qrDetected, String qrStatus, String qrStatusLabel,
+                                               String qrContent, String qrVerificationCode, String officialVerifyUrl,
+                                               String qrImageDataUrl, boolean officialConfirmed,
+                                               String proofOwnerName, String proofSchool, String proofEducation,
+                                               String proofMajor, Integer proofGraduationYear,
+                                               String proofEducationCategory, String proofDuration,
+                                               String proofStudyMode, String proofCollege, String proofDepartment,
+                                               String proofEnrollmentDate, String proofStudentStatus,
+                                               String proofExpectedGraduationDate,
                                                List<String> warnings, LocalDateTime checkedAt) {}
 
     /** ---------- ATS 检查 ---------- */
@@ -111,9 +135,12 @@ public final class ApiModels {
 
     public record ResumeView(Long id, String ownerName, String targetRole, String city, String phone,
                              String email, String education, String school, String major,
-                             Integer graduationYear, List<String> skills, List<ProjectItem> projects,
+                             Integer graduationYear, String educationCategory, String duration,
+                             String studyMode, String college, String department, String enrollmentDate,
+                             String studentStatus, String expectedGraduationDate,
+                             List<String> skills, List<ProjectItem> projects,
                              List<ExperienceItem> experiences, String selfEvaluation, String rawText,
-                             List<SkillProficiencyView> skillProficiencies,
+                             List<InterviewSkillEvidence> interviewSkillEvidence,
                              String educationVerificationStatus, String educationVerificationLabel,
                              Integer educationVerificationScore, Integer educationVerificationConfidence,
                              boolean educationVerified, LocalDateTime educationVerificationCheckedAt,
@@ -134,72 +161,17 @@ public final class ApiModels {
                                     List<String> matchedSkills, List<String> missingSkills,
                                     List<String> reasons, List<MatchScoreComponent> scoreBreakdown) {}
 
-    /** ---------- 技能水平验证 ---------- */
-    public record SkillTestStartRequest(@NotNull(message = "请选择简历") Long resumeId) {}
-
-    public record SkillOption(String key, String text) {}
-
-    public record SkillTestQuestion(Long id, String level, String topic,
-                                    String questionText, List<SkillOption> options) {}
-
-    public record SkillTestView(Long sessionId, String skill, String status,
-                                LocalDateTime startedAt, LocalDateTime expiresAt,
-                                List<SkillTestQuestion> questions) {}
-
-    public record SkillAnswer(Long questionId, String option) {}
-
-    public record SkillTestSubmitRequest(List<SkillAnswer> answers) {}
-
-    public record SkillRoundView(Long sessionId, String skill, int roundNo, int totalRounds,
-                                 String status, LocalDateTime startedAt, LocalDateTime expiresAt,
-                                 List<String> targetTopics, List<SkillTestQuestion> questions) {}
-
-    public record SkillRoundAnswer(Long questionId, String option, Integer responseMs, Double selfConfidence) {}
-
-    public record SkillRoundSubmitRequest(List<SkillRoundAnswer> answers) {}
-
-    public record SkillRoundResult(Long sessionId, int roundNo, int totalRounds, boolean completed,
-                                   SkillTestResult result, SkillRoundView nextRound,
-                                   Double guessRisk, Double consistency) {}
-
-    public record SkillLevelBreakdown(String level, int correct, int total, double accuracy) {}
-
-    public record SkillQuestionFeedback(Long questionId, String level, String topic,
-                                        String questionText, String selectedOption,
-                                        String correctOption, boolean correct, String explanation) {}
-
-    public record SkillMasteryView(String knowledgeComponent, double masteryProbability,
-                                   int attempts, int correctCount) {}
-
-    public record SkillTestResult(Long sessionId, String skill, int score, String level,
-                                  double confidence, int correctCount, int totalCount,
-                                  boolean proficiencySaved,
-                                  List<SkillLevelBreakdown> levelBreakdown,
-                                  List<String> weakTopics,
-                                  List<SkillQuestionFeedback> reviews,
-                                  Double bktMastery, Double bktConfidence,
-                                  List<SkillMasteryView> bktBreakdown,
-                                  LocalDateTime startedAt, LocalDateTime submittedAt) {}
-
-    public record SkillProficiencyView(Long resumeId, String skill, String declaredLevel,
-                                       String verifiedLevel, Integer score, Double confidence,
-                                       String evidenceType, Double bktMastery, Double bktConfidence,
-                                       Double guessRisk, Double consistency, Integer roundsCompleted,
-                                       LocalDateTime updatedAt) {
-        public SkillProficiencyView(Long resumeId, String skill, String declaredLevel, String verifiedLevel,
-                                    Integer score, Double confidence, String evidenceType, Double bktMastery,
-                                    Double bktConfidence, LocalDateTime updatedAt) {
-            this(resumeId, skill, declaredLevel, verifiedLevel, score, confidence, evidenceType,
-                    bktMastery, bktConfidence, null, null, 0, updatedAt);
-        }
-    }
-
     /** 城市岗位库：count 为该城市 ACTIVE 岗位总数。 */
     public record CityJobCount(String city, long count) {}
 
     /** 城市全量岗位库分页结果，page 从 0 开始。 */
     public record CityJobPage(String city, long total, int page, int size,
                               List<JobRecommendation> items) {}
+
+    /** 面试 Agent 形成的技能熟练度证据。 */
+    public record InterviewSkillEvidence(String skill, int score, String level, double confidence,
+                                         boolean verified, String source, List<String> evidence,
+                                         LocalDateTime updatedAt) {}
 
     public record InterviewStartRequest(@NotNull(message = "请选择简历") Long resumeId,
                                         @NotNull(message = "请选择目标岗位") Long jobId,
@@ -213,6 +185,7 @@ public final class ApiModels {
     public record InterviewView(Long id, Long resumeId, Long jobId, String jobTitle,
                                 String difficulty, String status, int currentRound, int totalRounds,
                                 int overallScore, List<InterviewMessage> messages,
+                                List<InterviewSkillEvidence> skillEvidence,
                                 LocalDateTime startedAt, LocalDateTime updatedAt) {}
 
     public record DiagnosisRequest(Long resumeId, Long jobId) {}

@@ -23,10 +23,10 @@ from collections import Counter
 from typing import Any, TypedDict
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph
 
 from .config import settings
+from .llm import create_chat_model
 from .job_tools import (
     filter_jobs,
     finalize_recommendation,
@@ -180,12 +180,7 @@ class JobRecommendationAgent:
         self.llm_enabled = settings.llm_enabled
         self.model = None
         if self.llm_enabled:
-            self.model = ChatOpenAI(
-                model=settings.openai_model,
-                api_key=settings.openai_api_key,
-                base_url=settings.openai_base_url,
-                temperature=0.2,
-            )
+            self.model = create_chat_model(temperature=0.2)
         self.graph = self._build_graph()
 
     # ------------------------------------------------------------------ llm

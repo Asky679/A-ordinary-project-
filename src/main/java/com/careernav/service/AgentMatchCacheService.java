@@ -16,8 +16,9 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * 岗位 Agent 匹配结果缓存。
  *
- * <p>缓存键同时包含简历版本、岗位 ID 和岗位内容版本，因此简历或 JD 修改后不会命中旧结果。
- * 推荐页批量精排后写入缓存，诊断页会优先读取同一个结果，保证两个页面口径一致。</p>
+ * <p>缓存键同时包含简历版本、岗位 ID、岗位内容版本和面试证据指纹，因此简历、JD 或面试证据
+ * 更新后都不会命中旧结果。推荐页批量精排后写入缓存，诊断页会优先读取同一个结果，保证两个
+ * 页面口径一致。</p>
  */
 @Service
 public class AgentMatchCacheService {
@@ -50,6 +51,12 @@ public class AgentMatchCacheService {
         cache.put(key(resume, job), new CacheEntry(item, Instant.now().plus(TTL)));
     }
 
+    /** 学历核验等不修改简历正文、但会改变匹配输入的状态，需要显式失效该简历的缓存。 */
+    public void invalidateResume(Long resumeId) {
+        if (resumeId == null) return;
+        cache.keySet().removeIf(key -> java.util.Objects.equals(key.resumeId(), resumeId));
+    }
+
     public Map<String, Object> stats() {
         long hitCount = hits.get();
         long missCount = misses.get();
@@ -67,7 +74,14 @@ public class AgentMatchCacheService {
         LocalDateTime resumeVersion = resume.updatedAt() != null ? resume.updatedAt() : resume.createdAt();
         String jobVersion = job.getContentHash();
         if (jobVersion == null || jobVersion.isBlank()) jobVersion = job.getExternalId();
-        return new CacheKey(resume.id(), job.getId(), resumeVersion, jobVersion);
+        String evidenceVersion = resume.interviewSkillEvidence() == null ? "" :
+                resume.interviewSkillEvidence().stream()
+                        .filter(item -> item != null)
+                        .sorted(java.util.Comparator.comparing(item -> String.valueOf(item.skill())))
+                        .map(item -> item.skill() + ":" + item.score() + ":" + item.verified() + ":"
+                                + item.updatedAt())
+                        .collect(java.util.stream.Collectors.joining("|"));
+        return new CacheKey(resume.id(), job.getId(), resumeVersion, jobVersion, evidenceVersion);
     }
 
     private void cleanup() {
@@ -78,7 +92,8 @@ public class AgentMatchCacheService {
                 .map(Map.Entry::getKey).toList().forEach(cache::remove);
     }
 
-    private record CacheKey(Long resumeId, Long jobId, LocalDateTime resumeVersion, String jobVersion) {}
+    private record CacheKey(Long resumeId, Long jobId, LocalDateTime resumeVersion, String jobVersion,
+                            String evidenceVersion) {}
 
     private record CacheEntry(AgentMatchItem item, Instant expiresAt) {}
 }

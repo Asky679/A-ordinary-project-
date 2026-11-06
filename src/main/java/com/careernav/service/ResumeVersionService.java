@@ -148,8 +148,9 @@ public class ResumeVersionService {
 
     private ResumePayload toPayload(ResumeView v) {
         return new ResumePayload(v.ownerName(), v.targetRole(), v.city(), v.phone(), v.email(),
-                v.education(), v.school(), v.major(), v.graduationYear(), v.skills(),
-                v.projects(), v.experiences(), v.selfEvaluation(), v.rawText());
+                v.education(), v.school(), v.major(), v.graduationYear(), v.educationCategory(), v.duration(),
+                v.studyMode(), v.college(), v.department(), v.enrollmentDate(), v.studentStatus(),
+                v.expectedGraduationDate(), v.skills(), v.projects(), v.experiences(), v.selfEvaluation(), v.rawText());
     }
 
     private void diff(List<ResumeFieldDiff> out, String field, String label, String left, String right) {

@@ -11,10 +11,10 @@ import os
 from typing import Any, TypedDict
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph
 
 from .config import settings
+from .llm import create_chat_model
 
 SYSTEM_PROMPT = """你是岗位匹配权重规划 Agent。给定一位候选人的简历和一组岗位，请逐个岗位分析要求，并给出受限的六维权重、判断理由和逐条证据。
 
@@ -30,14 +30,14 @@ SYSTEM_PROMPT = """你是岗位匹配权重规划 Agent。给定一位候选人�
    - 项目或实习中有对应实践 → "满足"
    - 只在技能栏出现、没有项目证据 → "部分满足"
    - 完全没有 → "不满足"
-   - skillProficiencies 是系统正式水平测试结果，优先级高于技能自述和项目描述：
-     * 测试分 < 45 或“待提升” → 不得标记为满足，最高为“不满足”
-     * 测试分 45～59 或“初级” → 最高为“部分满足”
-     * 测试分 60～79 或“中级” → 最高为“部分满足”
-     * 测试分 ≥ 80 或“高级” → 可标记为“满足”
+   - interviewSkillEvidence 是系统面试形成的技能证据，优先级高于技能自述和项目描述：
+     * 面试评分 < 45 或“待验证” → 不得标记为满足，最高为“不满足”
+     * 面试评分 45～59 或“初级” → 最高为“部分满足”
+     * 面试评分 60～79 或“中级” → 最高为“部分满足”
+     * 面试评分 ≥ 80 或“高级” → 可标记为“满足”
      * bktMastery 是跨轮知识点掌握概率；guessRisk 是疑似猜测风险；consistency 是同知识点多轮一致性。
      * 若 roundsCompleted ≥ 2 且（bktMastery < 0.40 或 bktConfidence < 0.50 或 guessRisk ≥ 0.60 或 consistency < 0.50），即使测试分较高，也最高标记为“部分满足”，并在 evidence 中说明需要复测。
-   - 简历写了某项技能但测试未通过时，不能因为项目文字提到该技术就忽略测试结果。
+   - 简历写了某项技能但面试未通过时，不能因为项目文字提到该技术就忽略测试结果。
 4. 只输出六维权重，不输出总分。权重必须是整数，并尽量让六项之和等于 100：
    - skills：20～50
    - role：10～35
@@ -158,12 +158,7 @@ class MatchAgent:
         self.llm_enabled = settings.llm_enabled
         self.model = None
         if self.llm_enabled:
-            self.model = ChatOpenAI(
-                model=settings.openai_model,
-                api_key=settings.openai_api_key,
-                base_url=settings.openai_base_url,
-                temperature=0,
-            )
+            self.model = create_chat_model(temperature=0)
         self.graph = self._build()
 
     # ---------------------------------------------------------------- nodes

@@ -48,7 +48,7 @@ def load_settings() -> Settings:
         openai_base_url=os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com/v1").strip(),
         openai_model=os.getenv("OPENAI_MODEL", "deepseek-chat").strip(),
         port=int(os.getenv("LANGGRAPH_PORT", "8001")),
-        max_rounds=int(os.getenv("LANGGRAPH_MAX_ROUNDS", "4")),
+        max_rounds=int(os.getenv("LANGGRAPH_MAX_ROUNDS", "5")),
     )
 
 

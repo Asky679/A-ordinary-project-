@@ -248,7 +248,7 @@ public class DiagnosisService {
     }
 
     private int achievement(ResumeView resume) {
-        String text = safe(resume.projects()).stream().map(item -> n(item.description()) + " " + n(item.highlight())).collect(Collectors.joining(" "))
+        String text = safe(resume.projects()).stream().map(item -> n(item.description()) + " " + n(item.challenge()) + " " + n(item.highlight())).collect(Collectors.joining(" "))
                 + " " + safe(resume.experiences()).stream().map(item -> n(item.description()) + " " + n(item.achievement())).collect(Collectors.joining(" "));
         long evidenceCount = EVIDENCE.matcher(text).results().count();
         long highlighted = safe(resume.projects()).stream().filter(item -> nonBlank(item.highlight())).count();
@@ -261,13 +261,13 @@ public class DiagnosisService {
         int projectScore = Math.min(25, safe(resume.projects()).size() * 15);
         long highlighted = safe(resume.projects()).stream().filter(item -> nonBlank(item.highlight())).count();
         int highlightScore = Math.min(20, (int) highlighted * 10);
-        int testAdjustment = 0;
-        for (var proficiency : safe(resume.skillProficiencies())) {
-            if (proficiency == null || proficiency.score() == null) continue;
-            if (proficiency.score() < 45) testAdjustment -= 20;
-            else if (proficiency.score() >= 80) testAdjustment += 4;
+        int interviewAdjustment = 0;
+        for (var evidence : safe(resume.interviewSkillEvidence())) {
+            if (evidence == null) continue;
+            if (evidence.score() < 45) interviewAdjustment -= 20;
+            else if (evidence.score() >= 80) interviewAdjustment += 4;
         }
-        return Math.max(20, Math.min(100, 20 + skillScore + projectScore + highlightScore + testAdjustment));
+        return Math.max(20, Math.min(100, 20 + skillScore + projectScore + highlightScore + interviewAdjustment));
     }
 
     private int expression(ResumeView resume, Set<String> matched) {
@@ -337,12 +337,12 @@ public class DiagnosisService {
         int depth = dimensionScore(dimensions, "技术深度");
         int expression = dimensionScore(dimensions, "表达与ATS");
 
-        safe(resume.skillProficiencies()).stream()
-                .filter(item -> item != null && item.score() != null && item.score() < 45)
-                .findFirst().ifPresent(item -> values.add(new DiagnosisSuggestion("P0", "技能验证",
-                        item.skill() + " 水平测试仅 " + item.score() + " 分，未达到简历声称的掌握程度",
-                        "先补齐该技能的基础知识并重新测试；测试通过前不要把熟练或精通写进简历",
-                        "针对薄弱主题完成专项练习，再重新进行限时水平验证")));
+        safe(resume.interviewSkillEvidence()).stream()
+                .filter(item -> item != null && item.score() < 45)
+                .findFirst().ifPresent(item -> values.add(new DiagnosisSuggestion("P0", "技能面试",
+                        item.skill() + " 面试评分仅 " + item.score() + " 分，未达到简历声称的掌握程度",
+                        "围绕基础概念、项目实现、故障边界和方案取舍继续准备，再重新进行技能面试",
+                        "回答时绑定真实项目、具体技术选择和可验证结果，不要只背定义")));
         if (!resume.educationVerified()) {
             values.add(new DiagnosisSuggestion("P0", "学历真实性",
                     "学历材料尚未通过真实性核验，当前按不合格学历计分",
@@ -401,6 +401,7 @@ public class DiagnosisService {
         String projectText = safe(resume.projects()).stream().limit(3)
                 .map(project -> project.name() + " | 技术：" + safeText(project.techStack(), "未填写")
                         + " | 描述：" + safeText(project.description(), "未填写")
+                        + " | 难点与取舍：" + safeText(project.challenge(), "未填写")
                         + " | 成果：" + safeText(project.highlight(), "未量化"))
                 .collect(Collectors.joining("\n"));
         String qualityText = dimensions.stream().map(item -> item.name() + ":" + item.score() + "/100").collect(Collectors.joining("，"));

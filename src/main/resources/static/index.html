@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
+  <link rel="icon" href="data:,">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="面向计算机学生的职业发展智能导航平台">
@@ -19,6 +20,7 @@
         <button class="nav-item" data-view="resume"><span class="nav-icon">▤</span><span>简历工坊</span></button>
         <button class="nav-item" data-view="library"><span class="nav-icon">▦</span><span>简历仓库</span></button>
         <button class="nav-item" data-view="jobs"><span class="nav-icon">⌕</span><span>岗位雷达</span></button>
+        <button class="nav-item" data-view="project-questions"><span class="nav-icon">⌘</span><span>项目面试助手</span></button>
         <button class="nav-item" data-view="interview"><span class="nav-icon">◉</span><span>模拟面试</span></button>
         <button class="nav-item" data-view="diagnosis"><span class="nav-icon">✓</span><span>简历诊断</span></button>
       </nav>
@@ -103,8 +105,8 @@
               <div id="dashboard-jobs" class="compact-jobs"><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div></div>
             </article>
             <article class="panel diagnosis-preview">
-              <div class="panel-head"><div><span class="eyebrow">RESUME DIAGNOSIS</span><h3>最近诊断</h3></div><button class="text-button" data-go="diagnosis">重新诊断 →</button></div>
-              <div id="dashboard-diagnosis"><div class="empty-mini">运行诊断后查看质量与岗位匹配分析</div></div>
+              <div class="panel-head"><div><span class="eyebrow">POST-INTERVIEW DIAGNOSIS</span><h3>最近面试诊断</h3></div><button class="text-button" data-go="interview">进入模拟面试 →</button></div>
+              <div id="dashboard-diagnosis"><div class="empty-mini">完成岗位面试后，在模拟面试页内查看诊断分析</div></div>
             </article>
           </div>
         </section>
@@ -112,7 +114,7 @@
                 <section class="view" id="view-resume">
           <div class="page-heading resume-page-heading">
             <div><span class="eyebrow">RESUME WORKBENCH</span><h1>简历工坊</h1><p>参考 300 份真实简历模板，按结构化内容生成可投递的单页简历。</p></div>
-            <div class="heading-actions"><button class="ghost-button" id="new-resume">＋ 新建简历</button><button class="ghost-button" id="open-ats">ATS 体检</button><button class="ghost-button" id="open-guidance">引导式编写</button><button class="ghost-button" id="save-version">保存版本</button><button class="ghost-button" id="export-resume-pdf">导出 PDF</button><button class="primary-button" id="save-resume">保存到仓库</button></div>
+            <div class="heading-actions"><button class="ghost-button" id="new-resume">＋ 新建简历</button><button class="ghost-button" id="open-resume-import">导入 PDF / 图片</button><button class="ghost-button" id="open-ats">ATS 体检</button><button class="ghost-button" id="open-guidance">引导式编写</button><button class="ghost-button" id="save-version">保存版本</button><button class="ghost-button" id="export-resume-pdf">导出 PDF</button><button class="primary-button" id="save-resume">保存到仓库</button></div>
           </div>
           <div class="resume-workbench">
             <form class="resume-editor-panel" id="resume-form">
@@ -128,7 +130,6 @@
                   <label><span>姓名 *</span><input id="owner-name" required placeholder="例如：林同学"></label>
                   <label><span>目标岗位 *</span><input id="target-role" required placeholder="例如：Java 后端开发工程师"></label>
                   <label><span>期望城市</span><input id="city" placeholder="长沙"></label>
-                  <label><span>毕业年份</span><input id="graduation-year" type="number" min="2024" max="2035" placeholder="2026"></label>
                   <label><span>手机</span><input id="phone" placeholder="13800000000"></label>
                   <label><span>邮箱</span><input id="email" type="email" placeholder="name@example.com"></label>
                 </div>
@@ -140,6 +141,15 @@
                   <label><span>学历</span><select id="education"><option>本科</option><option>硕士</option><option>大专</option><option>博士</option></select></label>
                   <label><span>学校</span><input id="school" placeholder="学校名称"></label>
                   <label><span>专业</span><input id="major" placeholder="计算机科学与技术"></label>
+                  <label><span>毕业年份</span><input id="graduation-year" type="number" min="2024" max="2035" placeholder="2028"></label>
+                  <label><span>学历类别</span><input id="education-category" placeholder="普通高等教育"></label>
+                  <label><span>学制</span><input id="duration" placeholder="4 年"></label>
+                  <label><span>学习形式</span><input id="study-mode" placeholder="普通全日制"></label>
+                  <label><span>分院 / 学院</span><input id="college" placeholder="信息科学与工程学院"></label>
+                  <label><span>系所</span><input id="department" placeholder="软件工程系"></label>
+                  <label><span>入学日期</span><input id="enrollment-date" placeholder="2024-09-07"></label>
+                  <label><span>学籍状态</span><input id="student-status" placeholder="在籍（注册学籍）"></label>
+                  <label><span>预计毕业日期</span><input id="expected-graduation-date" placeholder="2028-06-30"></label>
                 </div>
                 <div class="education-verification-card" id="education-verification">
                   <div class="edu-verify-head">
@@ -191,11 +201,7 @@
                   <div class="selected-skill-head"><span>已选技能 <b id="skill-count">0</b> 项</span><small>点击标签可移除，继续选择不会重复</small></div>
                   <div class="selected-skills" id="selected-skills"></div>
                   <div class="custom-skill-row"><input id="custom-skill-input" placeholder="补充技能，例如 Unity、Flutter、Kubernetes"><button type="button" class="ghost-button" id="add-custom-skill">＋ 添加自定义技能</button></div>
-                  <div class="skill-verify-strip" id="java-skill-verify" hidden>
-                    <div><span class="eyebrow">JAVA SKILL CHECK</span><strong>Java 水平验证</strong><p>10 道分级题 · 15 分钟 · 题库来源 GitHub MIT 仓库</p></div>
-                    <div class="skill-verify-side"><span class="skill-proficiency-badge" id="java-proficiency-badge">未验证</span><button type="button" class="primary-button" id="verify-java-skill">开始验证</button></div>
-                  </div>
-                </div>
+</div>
               </section>
 
               <section class="editor-section">
@@ -327,51 +333,56 @@
           <div id="job-list" class="job-list"><div class="loading-card"><i></i>正在读取 MCP 岗位流...</div></div>
         </section>
 
+        <section class="view" id="view-project-questions">
+          <div class="page-heading">
+            <div><span class="eyebrow">CODE GROUNDED INTERVIEW</span><h1>项目面试助手</h1><p>读取公开 Java 仓库或上传 ZIP 源码包，生成带源码证据的分层问题；记录回答后继续追问。</p></div>
+          </div>
+          <form class="panel project-question-form" id="project-question-form">
+            <label><span>GitHub 公开仓库地址</span><input id="project-repo-url" type="url" value="https://github.com/Asky679/A-ordinary-project-" placeholder="https://github.com/owner/repo"></label>
+            <label><span>或上传项目源码 ZIP（不超过 5 MB）</span><input id="project-zip-file" type="file" accept=".zip,application/zip"><small>选择 ZIP 后优先解析上传文件；不选则使用上面的 GitHub 地址。</small></label>
+            <label><span>项目描述（可选，作为待核查声明）</span><textarea id="project-description" rows="3" maxlength="2000" placeholder="例如：我负责简历版本管理，但没有线上压测数据。">学生课程项目：我参与实现简历版本管理、岗位匹配和模拟面试。没有线上用户或压测数据。</textarea></label>
+            <div class="project-form-foot"><p>演示仓库使用随项目保存的源码快照，避免 GitHub 限流；上传 ZIP 会在本地服务解析。每题提供对应的源码路径和片段。</p><button class="primary-button" id="generate-project-questions" type="submit">生成项目问题</button></div>
+          </form>
+          <div id="project-question-result" aria-live="polite"><div class="panel project-question-empty">输入仓库地址或选择 ZIP，点击「生成项目问题」开始测试。</div></div>
+        </section>
+
         <section class="view" id="view-interview">
           <div class="page-heading">
-            <div><span class="eyebrow">AGENT INTERVIEW LAB</span><h1>模拟面试</h1><p>由 Agent 面试官读取岗位与项目经历，进行四轮动态追问、即时评分和针对性反馈。</p></div>
+            <div><span class="eyebrow">AI INTERVIEW &amp; DIAGNOSIS</span><h1>模拟面试</h1><p>先选择岗位并完成五轮面试，面试结束后才开放简历诊断。后续数字人可在这个独立页面继续扩展。</p></div>
             <span class="session-status" id="interview-status">尚未开始</span>
           </div>
           <div class="interview-layout">
             <aside class="panel interview-setup">
-              <span class="eyebrow">SESSION SETUP</span><h3>配置面试</h3>
-              <label><span>选择简历</span><select id="interview-resume"></select></label>
-              <label><span>目标岗位</span><select id="interview-job"></select></label>
+              <span class="eyebrow">SESSION SETUP</span><h3>配置本场面试</h3>
+              <label><span>选择简历 *</span><select id="interview-resume"></select></label>
+              <label><span>目标岗位 *</span><select id="interview-job"></select></label>
               <label><span>面试强度</span><div class="segmented" id="interview-difficulty"><button class="active" data-value="标准">标准</button><button data-value="压力">压力</button></div></label>
-              <button class="primary-button full" id="start-interview">启动 AI 面试官 <span>→</span></button>
-              <div class="setup-note"><i>✦</i><p>Agent 会结合简历项目和岗位技能动态调整问题，根据每轮回答继续深挖，并给出可执行的改进建议。</p></div>
+              <button class="primary-button full" id="start-interview">启动模拟面试 <span>→</span></button>
+              <div class="interview-context-card"><span>当前简历</span><strong id="interview-resume-label">—</strong></div>
+              <div class="interview-context-card"><span>当前岗位</span><strong id="interview-job-label">—</strong></div>
+              <div class="interview-focus-card"><span>岗位考察方向</span><div id="interview-focus-tags" class="interview-focus-tags"><small>选择岗位后自动生成</small></div><p>问题优先围绕岗位技能和任职要求，简历用于选择项目载体。</p></div>
+              <div class="interview-stage-list"><span><i>1</i>基础概念</span><span><i>2</i>项目实现</span><span><i>3</i>故障与边界</span><span><i>4</i>方案取舍</span><span><i>5</i>结果验证</span></div>
+              <div class="setup-note"><i>✦</i><p>不选择岗位不能开始面试。每次重新开始都会清空上一轮会话和诊断，未完成本场面试不会生成诊断分。</p></div>
             </aside>
             <article class="panel chat-panel">
-              <div class="chat-head">
-                <div class="interviewer-avatar"><span>AI</span><i></i></div>
-                <div><strong>职航面试官</strong><small id="chat-job-title">等待选择目标岗位</small></div>
-                <div class="round-progress"><span id="round-text">0 / 4</span><div><i id="round-bar"></i></div></div>
-              </div>
-              <div id="chat-messages" class="chat-messages">
-                <div class="chat-empty"><div class="empty-orbit">AI</div><h3>准备好后开始面试</h3><p>系统将根据岗位技术栈与项目经历生成问题。</p></div>
-              </div>
-              <div class="answer-box">
-                <textarea id="interview-answer" rows="3" placeholder="输入你的回答，建议使用 STAR 结构并补充数据结果..."></textarea>
-                <div><span>Enter 发送 · Shift + Enter 换行</span><button class="primary-button" id="send-answer">发送回答 ↑</button></div>
-              </div>
+              <div class="chat-head"><div class="interviewer-avatar"><span>AI</span><i></i></div><div><strong>职航面试官</strong><small id="chat-job-title">等待选择目标岗位</small></div><div class="round-progress"><span id="round-text">0 / 5</span><div><i id="round-bar"></i></div></div></div>
+              <div id="chat-messages" class="chat-messages"><div class="chat-empty"><div class="empty-orbit">AI</div><h3>选择岗位后开始面试</h3><p>五轮回答会形成面试证据，完成后解锁简历诊断。</p></div></div>
+              <div class="answer-box"><textarea id="interview-answer" rows="3" placeholder="结合真实项目回答；说明原理、你的动作、边界与验证结果..."></textarea><div><span>Enter 发送 · Shift + Enter 换行</span><button class="primary-button" id="send-answer">发送回答 ↑</button></div></div>
             </article>
           </div>
+          <section class="panel interview-diagnosis-panel" id="interview-diagnosis-panel" hidden>
+            <div class="interview-diagnosis-head"><div><span class="eyebrow">POST-INTERVIEW DIAGNOSIS</span><h2>面试后简历诊断</h2><p>只有本场面试完成后才允许生成诊断分。</p></div><div class="diagnosis-actions"><button class="primary-button" id="run-interview-diagnosis">生成简历诊断</button></div></div>
+            <div id="interview-diagnosis-content"></div>
+          </section>
         </section>
 
         <section class="view" id="view-diagnosis">
           <div class="page-heading">
-            <div><span class="eyebrow">AGENT RESUME DIAGNOSIS</span><h1>简历诊断</h1><p>分别计算简历质量与岗位匹配，并解释综合分来源，再由 Agent 生成技能缺口与优先级修改建议。</p></div>
-            <div class="diagnosis-actions"><select id="diagnosis-resume"></select><select id="diagnosis-job"></select><button class="primary-button" id="run-diagnosis">启动 Agent 诊断</button><button class="ghost-button" id="run-job-agent">AI 岗位推荐</button></div>
+            <div><span class="eyebrow">POST-INTERVIEW DIAGNOSIS</span><h1>简历诊断</h1><p>诊断入口始终可见，但最终评分和修改建议只在完成对应岗位面试后解锁。</p></div>
+            <div class="diagnosis-actions"><select id="diagnosis-resume"></select><select id="diagnosis-job"></select></div>
           </div>
           <div id="diagnosis-content" class="diagnosis-empty panel">
-            <div class="scan-illustration"><span></span><i>简历</i><b>AI</b></div><h3>等待诊断任务</h3><p>选择目标岗位，智能体会输出评分、关键词缺口和按优先级排序的修改建议。</p>
-          </div>
-          <div id="job-agent-content" class="panel job-agent-panel">
-            <div class="job-agent-empty">
-              <div><span class="eyebrow">JOB RECOMMENDATION AGENT</span><h3>AI 岗位推荐</h3></div>
-              <p>Agent 会先读你的简历、自己规划检索语句，觉得召回质量不够时会换说法重搜，再用加权算法精排岗位。匹配分全部来自算法，可逐项追溯。</p>
-              <p class="job-agent-hint">点击右上角「AI 岗位推荐」开始，单次约 5-10 秒。</p>
-            </div>
+            <div class="diagnosis-lock-card"><span class="diagnosis-lock-icon">▣</span><h3>诊断内容已锁定</h3><p>请选择简历和目标岗位，并完成该岗位的模拟面试。面试结束前不会显示最终诊断分数。</p><button type="button" class="primary-button" data-go="interview">前往模拟面试</button></div>
           </div>
         </section>
 
@@ -393,21 +404,20 @@
     </div>
   </div>
 
+  <div class="modal-backdrop" id="resume-import-modal" aria-hidden="true">
+    <div class="modal resume-import-modal">
+      <button class="modal-close" type="button" data-close-resume-import>×</button>
+      <div id="resume-import-body"></div>
+    </div>
+  </div>
+
   <div class="modal-backdrop" id="ats-modal" aria-hidden="true">
     <div class="modal ats-modal">
       <button class="modal-close" data-close-ats>×</button>
       <div id="ats-body"></div>
     </div>
   </div>
-
-  <div class="modal-backdrop" id="skill-test-modal" aria-hidden="true">
-    <div class="modal skill-test-modal">
-      <button class="modal-close" data-close-skill-test>×</button>
-      <div id="skill-test-body"></div>
-    </div>
-  </div>
-
-  <div class="agent-overlay" id="agent-overlay" aria-hidden="true">
+<div class="agent-overlay" id="agent-overlay" aria-hidden="true">
     <div class="agent-console">
       <button class="modal-close" id="close-agent-overlay">×</button>
       <div class="console-head"><div class="agent-orb"><span></span><b>AI</b></div><div><span class="eyebrow">AUTONOMOUS TOOL CHAIN</span><h2>职航智能体正在工作</h2><p id="agent-overlay-summary">正在分析简历与岗位图谱...</p></div></div>
@@ -417,6 +427,7 @@
   </div>
 
   <div class="toast-stack" id="toast-stack"></div>
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
   <script src="/app.js"></script>
 </body>

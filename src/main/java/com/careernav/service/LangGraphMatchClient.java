@@ -93,7 +93,7 @@ public class LangGraphMatchClient {
         context.put("educationVerified", resume.educationVerified());
         context.put("educationVerificationStatus", resume.educationVerificationStatus());
         context.put("skills", resume.skills());
-        context.put("skillProficiencies", resume.skillProficiencies());
+        context.put("interviewSkillEvidence", resume.interviewSkillEvidence());
         context.put("projects", resume.projects());
         context.put("experiences", resume.experiences());
         context.put("selfEvaluation", resume.selfEvaluation());

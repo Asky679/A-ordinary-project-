@@ -4,8 +4,18 @@
 
 | Agent | 入口 | 职责 |
 | --- | --- | --- |
-| 面试 Agent | `POST /v1/interviews/start`、`POST /v1/interviews/{id}/answer` | 四轮递进追问、回答评分、会话记忆 |
+| 面试 Agent | `POST /v1/interviews/start`、`POST /v1/interviews/{id}/answer` | 五轮技能验证、回答评分、技能证据、会话记忆 |
 | 岗位推荐 Agent | `POST /v1/diagnosis/agent` | 读简历 -> 语义召回岗位 -> 算法精排 -> 反思重试 -> 输出推荐与技能缺口 |
+
+## 面试技能证据
+
+面试不是独立的小游戏，而是简历诊断的一部分。每场面试按以下五层推进：
+
+```text
+基础概念 -> 项目实现 -> 故障与边界 -> 方案取舍 -> 结果验证
+```
+
+Agent 根据岗位技能和上一轮回答选择下一问；完成后 Java 侧会把完整面试转录转换为技能证据，写入 `interview_sessions.skill_evidence_json`。低分核心技能会限制岗位适配度，不能靠 Agent 调权绕过。
 
 ## 启动
 

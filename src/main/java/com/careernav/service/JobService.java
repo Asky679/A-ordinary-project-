@@ -346,10 +346,11 @@ public class JobService {
         String reason = agent.reason() == null || agent.reason().isBlank()
                 ? "Agent 已按岗位要求生成受限权重，最终分由确定性规则计算"
                 : agent.reason();
-        SkillProficiencyView failedJava = failedVerifiedSkill(resume, entity, "Java");
-        if (failedJava != null && !reason.contains("水平测试")) {
-            reason += "；Java 水平测试仅 " + failedJava.score() + " 分（" + safe(failedJava.verifiedLevel())
-                    + "），不满足熟练 Java 要求";
+        List<InterviewSkillEvidence> lowEvidence = lowInterviewEvidence(resume, entity);
+        if (!lowEvidence.isEmpty()) {
+            reason += "；简历技能已命中岗位要求，面试低分仅进入后续诊断："
+                    + lowEvidence.stream().map(item -> item.skill() + " " + item.score() + " 分")
+                    .collect(java.util.stream.Collectors.joining("、"));
         }
         return new AgentMatchItem(entity.getId(), baseline.matchScore(), adjusted.matchScore(),
                 adjusted.matchScore(), adjusted.matchLevel(), reason,
@@ -359,35 +360,62 @@ public class JobService {
     private List<MatchBreakdown> effectiveAgentBreakdown(ResumeView resume, JobEntity job,
                                                          List<LangGraphMatchClient.Breakdown> rows) {
         List<MatchBreakdown> result = new ArrayList<>();
-        SkillProficiencyView failedJava = failedVerifiedSkill(resume, job, "Java");
-        boolean replaced = false;
+        Set<String> declared = normalize(resume.skills());
+        Set<String> required = jsonCodec.readList(job.getSkillsJson(), String.class).stream()
+                .filter(item -> item != null && !item.isBlank())
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        Set<String> covered = new LinkedHashSet<>();
         for (LangGraphMatchClient.Breakdown row : rows) {
-            boolean javaRow = row.requirement().toLowerCase(Locale.ROOT).contains("java");
-            if (failedJava != null && javaRow) {
-                result.add(new MatchBreakdown(row.requirement(), row.importance(), "不满足",
-                        "Java 水平测试 " + failedJava.score() + " 分（" + safe(failedJava.verifiedLevel())
-                                + "），测试结果优先于技能自述和项目描述"));
-                replaced = true;
+            String declaredSkill = required.stream()
+                    .filter(skill -> declared.contains(normalizeSkill(skill)))
+                    .filter(skill -> requirementMentionsSkill(row.requirement(), skill))
+                    .findFirst().orElse(null);
+            if (declaredSkill != null) {
+                result.add(new MatchBreakdown(row.requirement(), row.importance(), "满足",
+                        skillMatchEvidence(resume, declaredSkill)));
+                covered.add(normalizeSkill(declaredSkill));
             } else {
                 result.add(new MatchBreakdown(row.requirement(), row.importance(), row.status(), row.evidence()));
             }
         }
-        if (failedJava != null && !replaced) {
-            result.add(0, new MatchBreakdown("熟练掌握 Java", "硬性", "不满足",
-                    "Java 水平测试 " + failedJava.score() + " 分（" + safe(failedJava.verifiedLevel()) + "）"));
+        for (String skill : required) {
+            if (!declared.contains(normalizeSkill(skill)) || covered.contains(normalizeSkill(skill))) continue;
+            result.add(0, new MatchBreakdown("掌握 " + skill, "硬性", "满足", skillMatchEvidence(resume, skill)));
         }
         return result;
     }
 
-    private SkillProficiencyView failedVerifiedSkill(ResumeView resume, JobEntity job, String skill) {
-        if (resume.skillProficiencies() == null) return null;
-        boolean required = jsonCodec.readList(job.getSkillsJson(), String.class).stream()
-                .map(this::normalizeSkill).anyMatch(normalizeSkill(skill)::equals);
-        if (!required) return null;
-        return resume.skillProficiencies().stream()
-                .filter(item -> item != null && normalizeSkill(item.skill()).equals(normalizeSkill(skill)))
-                .filter(item -> item.score() != null && item.score() < 45)
+    private String skillMatchEvidence(ResumeView resume, String skill) {
+        InterviewSkillEvidence evidence = interviewEvidence(resume, skill);
+        if (evidence == null) return "简历技能清单与岗位要求匹配，尚无面试证据";
+        return "简历技能清单与岗位要求匹配；面试评分 " + evidence.score() + " 分（"
+                + safe(evidence.level()) + "），仅用于后续诊断，不否定简历技能命中";
+    }
+
+    private List<InterviewSkillEvidence> lowInterviewEvidence(ResumeView resume, JobEntity job) {
+        if (resume.interviewSkillEvidence() == null || resume.interviewSkillEvidence().isEmpty()) return List.of();
+        Set<String> required = jsonCodec.readList(job.getSkillsJson(), String.class).stream()
+                .map(this::normalizeSkill).filter(item -> !item.isBlank())
+                .collect(java.util.stream.Collectors.toSet());
+        return resume.interviewSkillEvidence().stream()
+                .filter(item -> item != null && item.skill() != null)
+                .filter(item -> required.contains(normalizeSkill(item.skill())))
+                .filter(item -> item.score() < 45)
+                .toList();
+    }
+
+    private InterviewSkillEvidence interviewEvidence(ResumeView resume, String skill) {
+        if (resume.interviewSkillEvidence() == null) return null;
+        String key = normalizeSkill(skill);
+        return resume.interviewSkillEvidence().stream()
+                .filter(item -> item != null && normalizeSkill(item.skill()).equals(key))
                 .findFirst().orElse(null);
+    }
+
+    private boolean requirementMentionsSkill(String requirement, String skill) {
+        String row = normalizeSkill(requirement);
+        String key = normalizeSkill(skill);
+        return !key.isBlank() && row.contains(key);
     }
 
     private MatchWeights weightsFromAgent(AgentMatchWeights weights) {
@@ -529,10 +557,6 @@ public class JobService {
             hardCap = Math.min(hardCap, 45);
             capReasons.add("工作经验低于岗位要求");
         }
-        if (skill.verificationFailure()) {
-            hardCap = Math.min(hardCap, 50);
-            capReasons.add("岗位核心技能未通过水平验证");
-        }
         if (!resume.educationVerified()) {
             hardCap = Math.min(hardCap, 55);
             capReasons.add("学历材料未通过真实性核验");
@@ -556,7 +580,7 @@ public class JobService {
         if (!skill.matched().isEmpty()) reasons.add("已覆盖 " + joinPreview(skill.matched(), 4));
         if (!skill.missing().isEmpty()) reasons.add("建议补强 " + joinPreview(skill.missing(), 3));
         if (!skill.verificationNotes().isEmpty()) {
-            reasons.add("水平测试：" + String.join("；", skill.verificationNotes().stream().limit(3).toList()));
+            reasons.add("技能匹配：" + String.join("；", skill.verificationNotes().stream().limit(3).toList()));
         }
         if (weights.role() > 0) reasons.add(role.detail());
         if (weights.experience() > 0 && experience.factor() < 0.999) reasons.add(experience.detail());
@@ -575,32 +599,42 @@ public class JobService {
             String key = normalizeSkill(value);
             if (!key.isBlank()) required.putIfAbsent(key, value.trim());
         }
-        Map<String, SkillProficiencyView> tested = new LinkedHashMap<>();
-        if (resume.skillProficiencies() != null) {
-            for (SkillProficiencyView item : resume.skillProficiencies()) {
-                if (item != null && item.skill() != null) tested.put(normalizeSkill(item.skill()), item);
+        Map<String, InterviewSkillEvidence> verifiedByInterview = new LinkedHashMap<>();
+        if (resume.interviewSkillEvidence() != null) {
+            for (InterviewSkillEvidence item : resume.interviewSkillEvidence()) {
+                if (item != null && item.skill() != null) {
+                    verifiedByInterview.putIfAbsent(normalizeSkill(item.skill()), item);
+                }
             }
         }
 
         List<String> matched = new ArrayList<>();
         List<String> missing = new ArrayList<>();
         List<String> verificationNotes = new ArrayList<>();
-        boolean verificationFailure = false;
         double matchedWeight = 0;
         double totalWeight = 0;
         int index = 0;
         for (Map.Entry<String, String> item : required.entrySet()) {
             double importance = index < 3 ? 1.2 : 1.0;
             totalWeight += importance;
-            SkillProficiencyView verification = tested.get(item.getKey());
+            boolean declared = owned.contains(item.getKey());
+            InterviewSkillEvidence evidence = verifiedByInterview.get(item.getKey());
             double credit;
-            if (verification != null && (verification.score() != null || verification.verifiedLevel() != null)) {
-                credit = verifiedSkillCredit(verification);
-                if (credit < 0.45) verificationFailure = true;
-                verificationNotes.add(item.getValue() + "水平测试" + (verification.score() == null ? "" : verification.score() + "分")
-                        + "（" + safe(verification.verifiedLevel()) + "）");
+            if (declared) {
+                // 岗位推荐阶段以简历技能清单是否命中岗位要求为准。
+                // 面试结果留到最终诊断中解释能力深度，不反向否定技能命中。
+                credit = 1.0;
+                if (evidence != null) {
+                    verificationNotes.add(item.getValue() + "简历技能命中；面试评分" + evidence.score()
+                            + "分（" + safe(evidence.level()) + "），仅用于后续诊断");
+                } else {
+                    verificationNotes.add(item.getValue() + "简历技能命中，尚无面试证据");
+                }
+            } else if (evidence != null && evidence.verified() && evidence.score() >= 60) {
+                credit = 0.65;
+                verificationNotes.add(item.getValue() + "由已验证的面试证据补充");
             } else {
-                credit = owned.contains(item.getKey()) ? 1.0 : 0.0;
+                credit = 0.0;
             }
             matchedWeight += importance * credit;
             if (credit >= 0.60) matched.add(item.getValue()); else missing.add(item.getValue());
@@ -608,14 +642,16 @@ public class JobService {
         }
         if (required.isEmpty()) return new SkillMatch(matched, missing, 0, 0.4, 0, false, List.of());
         double coverage = totalWeight == 0 ? 0 : matchedWeight / totalWeight;
-        double confidence = Math.min(1.0, 0.65 + required.size() * 0.12);
-        return new SkillMatch(matched, missing, coverage, clamp01(coverage * confidence), required.size(),
-                verificationFailure, List.copyOf(verificationNotes));
+        // 岗位技能匹配只看简历技能清单对岗位要求的覆盖率，面试评分不在这里做二次折减。
+        return new SkillMatch(matched, missing, coverage, clamp01(coverage), required.size(),
+                false, List.copyOf(verificationNotes));
     }
 
-    private double verifiedSkillCredit(SkillProficiencyView verification) {
-        int score = verification.score() == null ? -1 : verification.score();
-        String level = safe(verification.verifiedLevel());
+    private double interviewSkillCredit(InterviewSkillEvidence evidence) {
+        int score = evidence.score();
+        String level = safe(evidence.level());
+        // 未达到可信阈值的回答只能作为弱证据，不能和已验证技能同分。
+        if (!evidence.verified()) return score >= 45 ? 0.25 : 0.0;
         if (score >= 80 || level.contains("高级")) return 1.0;
         if (score >= 60 || level.contains("中级")) return 0.65;
         if (score >= 45 || level.contains("初级")) return 0.30;

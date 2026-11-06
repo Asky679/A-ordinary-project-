@@ -186,6 +186,15 @@ public class ResumePdfService {
                 if (!major.isBlank()) parts.add(major);
                 if (!year.isBlank()) parts.add(year);
                 rows.add(String.join("  ·  ", parts));
+                List<String> details = new ArrayList<>();
+                if (!nullSafe(resume.studyMode()).isBlank()) details.add(nullSafe(resume.studyMode()));
+                if (!nullSafe(resume.duration()).isBlank()) details.add("学制 " + nullSafe(resume.duration()));
+                if (!nullSafe(resume.college()).isBlank()) details.add(nullSafe(resume.college()));
+                if (!nullSafe(resume.department()).isBlank()) details.add(nullSafe(resume.department()));
+                if (!nullSafe(resume.studentStatus()).isBlank()) details.add(nullSafe(resume.studentStatus()));
+                if (!nullSafe(resume.enrollmentDate()).isBlank()) details.add("入学 " + nullSafe(resume.enrollmentDate()));
+                if (!nullSafe(resume.expectedGraduationDate()).isBlank()) details.add("预计毕业 " + nullSafe(resume.expectedGraduationDate()));
+                if (!details.isEmpty()) rows.add(String.join("  ·  ", details));
             }
             if (rows.isEmpty()) return;
             section("教育背景");

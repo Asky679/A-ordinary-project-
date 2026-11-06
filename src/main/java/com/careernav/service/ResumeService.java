@@ -26,16 +26,16 @@ public class ResumeService {
     private final ResumeRepository repository;
     private final ResumeVersionRepository versionRepository;
     private final EducationVerificationRepository verificationRepository;
-    private final SkillProficiencyQueryService skillProficiencyQueryService;
+    private final InterviewSkillEvidenceService interviewSkillEvidenceService;
     private final JsonCodec jsonCodec;
 
     public ResumeService(ResumeRepository repository, ResumeVersionRepository versionRepository,
                          EducationVerificationRepository verificationRepository,
-                         SkillProficiencyQueryService skillProficiencyQueryService, JsonCodec jsonCodec) {
+                         InterviewSkillEvidenceService interviewSkillEvidenceService, JsonCodec jsonCodec) {
         this.repository = repository;
         this.versionRepository = versionRepository;
         this.verificationRepository = verificationRepository;
-        this.skillProficiencyQueryService = skillProficiencyQueryService;
+        this.interviewSkillEvidenceService = interviewSkillEvidenceService;
         this.jsonCodec = jsonCodec;
     }
 
@@ -111,12 +111,14 @@ public class ResumeService {
         return new ResumeView(
                 entity.getId(), entity.getOwnerName(), entity.getTargetRole(), entity.getCity(),
                 entity.getPhone(), entity.getEmail(), entity.getEducation(), entity.getSchool(),
-                entity.getMajor(), entity.getGraduationYear(),
+                entity.getMajor(), entity.getGraduationYear(), entity.getEducationCategory(), entity.getDuration(),
+                entity.getStudyMode(), entity.getCollege(), entity.getDepartment(), entity.getEnrollmentDate(),
+                entity.getStudentStatus(), entity.getExpectedGraduationDate(),
                 jsonCodec.readList(entity.getSkillsJson(), String.class),
                 jsonCodec.readList(entity.getProjectsJson(), ProjectItem.class),
                 jsonCodec.readList(entity.getExperiencesJson(), ExperienceItem.class),
                 entity.getSelfEvaluation(), entity.getRawText(),
-                skillProficiencyQueryService.listByResume(entity.getId()),
+                interviewSkillEvidenceService.latestForResume(entity.getId()),
                 verification == null ? "UNVERIFIED" : verification.getStatus(),
                 verification == null ? "未核验" : verification.getStatusLabel(),
                 verification == null ? null : verification.getScore(),
@@ -192,6 +194,14 @@ public class ResumeService {
         entity.setSchool(payload.school());
         entity.setMajor(payload.major());
         entity.setGraduationYear(payload.graduationYear());
+        entity.setEducationCategory(payload.educationCategory());
+        entity.setDuration(payload.duration());
+        entity.setStudyMode(payload.studyMode());
+        entity.setCollege(payload.college());
+        entity.setDepartment(payload.department());
+        entity.setEnrollmentDate(payload.enrollmentDate());
+        entity.setStudentStatus(payload.studentStatus());
+        entity.setExpectedGraduationDate(payload.expectedGraduationDate());
         entity.setSkillsJson(jsonCodec.write(payload.skills() == null ? List.of() : payload.skills()));
         entity.setProjectsJson(jsonCodec.write(payload.projects() == null ? List.of() : payload.projects()));
         entity.setExperiencesJson(jsonCodec.write(payload.experiences() == null ? List.of() : payload.experiences()));

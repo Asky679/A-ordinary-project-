@@ -1,6 +1,7 @@
 package com.careernav.service;
 
 import com.careernav.domain.ApiModels.EducationVerificationResult;
+import com.careernav.entity.EducationVerificationEntity;
 import com.careernav.entity.ResumeEntity;
 import com.careernav.repository.EducationVerificationRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class EducationVerificationServiceTest {
@@ -43,8 +45,13 @@ class EducationVerificationServiceTest {
         when(agent.generateJson(anyString(), any())).thenReturn(null);
         EducationVerificationRepository repository = mock(EducationVerificationRepository.class);
         when(repository.findByResumeId(1L)).thenReturn(Optional.empty());
+        QrCodeService qrCodeService = mock(QrCodeService.class);
+        when(qrCodeService.decode(any(), anyString())).thenReturn(new QrCodeService.QrResult(
+                true, "OFFICIAL_QR", "已识别学信网官方二维码", "#TESTCODE123#", null, "TESTCODE123",
+                "https://www.chsi.com.cn/xlcx/yzzw.jsp", null, 1));
+        AgentMatchCacheService matchCache = mock(AgentMatchCacheService.class);
         EducationVerificationService service = new EducationVerificationService(
-                resumeService, agent, repository, new JsonCodec(new ObjectMapper()));
+                resumeService, agent, repository, new JsonCodec(new ObjectMapper()), qrCodeService, matchCache);
 
         byte[] pdf = reportPdf(fontFile);
         MockMultipartFile file = new MockMultipartFile("file", "education-report.pdf", "application/pdf", pdf);
@@ -54,12 +61,29 @@ class EducationVerificationServiceTest {
         assertTrue(result.passed());
         assertTrue(result.officialReportDetected());
         assertEquals(100, result.score());
-        assertTrue(result.checks().stream().allMatch(item -> "MATCH".equals(item.status())));
+        assertTrue(result.checks().stream().filter(item -> !"qrCode".equals(item.key()))
+                .allMatch(item -> "MATCH".equals(item.status())));
         assertEquals("RULE_FALLBACK", result.extractionMode());
     }
 
     @Test
-    void reportsMismatchWhenSchoolDiffers() throws Exception {
+    void cancelDeletesVerificationAndInvalidatesMatchCache() {
+        ResumeService resumeService = mock(ResumeService.class);
+        when(resumeService.getEntity(7L)).thenReturn(new ResumeEntity());
+        EducationVerificationRepository repository = mock(EducationVerificationRepository.class);
+        AgentMatchCacheService matchCache = mock(AgentMatchCacheService.class);
+        EducationVerificationService service = new EducationVerificationService(
+                resumeService, mock(AgentModelClient.class), repository,
+                new JsonCodec(new ObjectMapper()), mock(QrCodeService.class), matchCache);
+
+        service.cancel(7L);
+
+        verify(repository).deleteByResumeId(7L);
+        verify(matchCache).invalidateResume(7L);
+    }
+
+    @Test
+    void officialQrPassesEvenWhenSchoolDiffers() throws Exception {
         File fontFile = new File("C:/Windows/Fonts/simhei.ttf");
         if (!fontFile.exists()) return;
 
@@ -76,15 +100,22 @@ class EducationVerificationServiceTest {
         when(agent.generateJson(anyString(), any())).thenReturn(null);
         EducationVerificationRepository repository = mock(EducationVerificationRepository.class);
         when(repository.findByResumeId(1L)).thenReturn(Optional.empty());
+        QrCodeService qrCodeService = mock(QrCodeService.class);
+        when(qrCodeService.decode(any(), anyString())).thenReturn(new QrCodeService.QrResult(
+                true, "OFFICIAL_QR", "已识别学信网官方二维码", "#TESTCODE123#", null, "TESTCODE123",
+                "https://www.chsi.com.cn/xlcx/yzzw.jsp", null, 1));
+        AgentMatchCacheService matchCache = mock(AgentMatchCacheService.class);
         EducationVerificationService service = new EducationVerificationService(
-                resumeService, agent, repository, new JsonCodec(new ObjectMapper()));
+                resumeService, agent, repository, new JsonCodec(new ObjectMapper()), qrCodeService, matchCache);
 
         MockMultipartFile file = new MockMultipartFile(
                 "file", "education-report.pdf", "application/pdf", reportPdf(fontFile));
         EducationVerificationResult result = service.verify(1L, file, null);
 
-        assertEquals("MISMATCH", result.status());
-        assertFalse(result.passed());
+        assertEquals("CONSISTENT", result.status());
+        assertEquals("二维码核验通过", result.statusLabel());
+        assertTrue(result.passed());
+        assertEquals(100, result.score());
         assertTrue(result.checks().stream().anyMatch(item ->
                 "school".equals(item.key()) && "MISMATCH".equals(item.status())));
     }

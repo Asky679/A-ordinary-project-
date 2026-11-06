@@ -3,7 +3,7 @@ package com.careernav.service;
 import com.careernav.domain.ApiModels.ExperienceItem;
 import com.careernav.domain.ApiModels.ProjectItem;
 import com.careernav.domain.ApiModels.ResumeView;
-import com.careernav.domain.ApiModels.SkillProficiencyView;
+import com.careernav.domain.ApiModels.InterviewSkillEvidence;
 import com.careernav.entity.JobEntity;
 import com.careernav.repository.JobRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -14,16 +14,17 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
 class JobServiceSkillVerificationTest {
     @Test
-    void lowJavaTestScoreCannotSatisfyHardJavaRequirement() throws Exception {
+    void declaredJavaSkillCountsEvenWhenInterviewScoreIsLow() throws Exception {
         JobService service = service();
-        ResumeView resume = resume(new SkillProficiencyView(
-                1L, "Java", "自述", "待提升", 33, 0.85, "SKILL_TEST",
-                0.4253, 0.76, LocalDateTime.now()));
+        ResumeView resume = resume(new InterviewSkillEvidence(
+                "Java", 33, "待验证", 0.85, false, "INTERVIEW",
+                List.of("面试中无法解释核心原理"), LocalDateTime.now()));
         JobEntity job = javaJob();
 
         Method score = JobService.class.getDeclaredMethod(
@@ -32,17 +33,21 @@ class JobServiceSkillVerificationTest {
         var result = (com.careernav.domain.ApiModels.JobRecommendation) score.invoke(
                 service, resume, job, java.util.Set.of("java"), new JobService.MatchWeights(34, 22, 16, 10, 4, 14));
 
-        assertTrue(result.matchScore() <= 50);
-        assertTrue(result.missingSkills().stream().anyMatch(skill -> skill.equalsIgnoreCase("Java")));
-        assertTrue(result.reasons().stream().anyMatch(reason -> reason.contains("水平测试")));
+        assertTrue(result.matchScore() > 50);
+        var skillComponent = result.scoreBreakdown().stream()
+                .filter(item -> "skills".equals(item.key())).findFirst().orElseThrow();
+        assertEquals(1.0, skillComponent.factor(), 0.0001);
+        assertTrue(result.matchedSkills().stream().anyMatch(skill -> skill.equalsIgnoreCase("Java")));
+        assertFalse(result.missingSkills().stream().anyMatch(skill -> skill.equalsIgnoreCase("Java")));
+        assertTrue(result.reasons().stream().anyMatch(reason -> reason.contains("简历技能命中")));
     }
 
     @Test
-    void agentEvidenceIsOverriddenByFailedSkillTest() throws Exception {
+    void agentEvidenceKeepsDeclaredJavaSkillAsSatisfied() throws Exception {
         JobService service = service();
-        ResumeView resume = resume(new SkillProficiencyView(
-                1L, "Java", "自述", "待提升", 33, 0.85, "SKILL_TEST",
-                0.4253, 0.76, LocalDateTime.now()));
+        ResumeView resume = resume(new InterviewSkillEvidence(
+                "Java", 33, "待验证", 0.85, false, "INTERVIEW",
+                List.of("面试中无法解释核心原理"), LocalDateTime.now()));
         JobEntity job = javaJob();
         var agent = new LangGraphMatchClient.AgentScore(
                 1L, new com.careernav.domain.ApiModels.AgentMatchWeights(40, 25, 10, 5, 5, 15),
@@ -54,9 +59,9 @@ class JobServiceSkillVerificationTest {
         build.setAccessible(true);
         var result = (com.careernav.domain.ApiModels.AgentMatchItem) build.invoke(service, resume, job, agent);
 
-        assertEquals("不满足", result.breakdown().getFirst().status());
-        assertTrue(result.reason().contains("水平测试"));
-        assertTrue(result.finalScore() <= 50);
+        assertEquals("满足", result.breakdown().getFirst().status());
+        assertTrue(result.reason().contains("仅进入后续诊断"));
+        assertTrue(result.finalScore() > 50);
     }
 
     private JobService service() {
@@ -76,11 +81,12 @@ class JobServiceSkillVerificationTest {
         return job;
     }
 
-    private ResumeView resume(SkillProficiencyView java) {
+    private ResumeView resume(InterviewSkillEvidence java) {
         LocalDateTime now = LocalDateTime.now();
         return new ResumeView(
                 1L, "测试学生", "Java后端开发", "长沙", null, null,
                 "博士", "测试大学", "计算机科学与技术", 2026,
+                null, null, null, null, null, null, null, null,
                 List.of("Java"), List.of(new ProjectItem("测试项目", "后端", "Java", "接口开发", "支持1000用户")),
                 List.<ExperienceItem>of(), "测试简历", "测试简历", List.of(java),
                 "CONSISTENT", "信息一致", 100, 90, true, now, now, now

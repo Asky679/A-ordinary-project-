@@ -11,6 +11,7 @@ public class InterviewSessionEntity {
     private Long resumeId; private Long jobId; private String jobTitle; private String difficulty;
     private String status; private Integer currentRound; private Integer totalRounds; private Integer overallScore;
     @Column(columnDefinition = "text") private String messagesJson;
+    @Column(columnDefinition = "text") private String skillEvidenceJson;
     private LocalDateTime startedAt; private LocalDateTime updatedAt;
 
     public Long getId() { return id; } public void setId(Long id) { this.id = id; }
@@ -23,6 +24,7 @@ public class InterviewSessionEntity {
     public Integer getTotalRounds() { return totalRounds; } public void setTotalRounds(Integer v) { totalRounds = v; }
     public Integer getOverallScore() { return overallScore; } public void setOverallScore(Integer v) { overallScore = v; }
     public String getMessagesJson() { return messagesJson; } public void setMessagesJson(String v) { messagesJson = v; }
+    public String getSkillEvidenceJson() { return skillEvidenceJson; } public void setSkillEvidenceJson(String v) { skillEvidenceJson = v; }
     public LocalDateTime getStartedAt() { return startedAt; } public void setStartedAt(LocalDateTime v) { startedAt = v; }
     public LocalDateTime getUpdatedAt() { return updatedAt; } public void setUpdatedAt(LocalDateTime v) { updatedAt = v; }
 }

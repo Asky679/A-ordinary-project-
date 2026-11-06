@@ -1,11 +1,46 @@
 import json
 import os
+import re
+from pathlib import Path
 from typing import Any
 
 import requests
 from langchain_core.tools import tool
 
 CONTEXTS: dict[str, dict[str, Any]] = {}
+
+EXPERIENCE_PATTERNS_PATH = Path(__file__).resolve().parents[1] / "data" / "interview-experiences" / "patterns.jsonl"
+
+
+def _load_experience_patterns() -> list[dict[str, Any]]:
+    try:
+        lines = EXPERIENCE_PATTERNS_PATH.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    rows = []
+    for line in lines:
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(item, dict) and item.get("question"):
+            rows.append(item)
+    return rows
+
+
+EXPERIENCE_PATTERNS = _load_experience_patterns()
+
+
+def _retrieval_tokens(text: str) -> set[str]:
+    value = (text or "").lower()
+    tokens = set(re.findall(r"[a-z][a-z0-9+#._-]{1,24}", value))
+    for sequence in re.findall(r"[\u4e00-\u9fff]+", value):
+        if 2 <= len(sequence) <= 8:
+            tokens.add(sequence)
+        for index in range(len(sequence) - 1):
+            tokens.add(sequence[index:index + 2])
+    return {token for token in tokens if token.strip()}
+
 
 QUESTION_BANK = {
     "self_intro": [
@@ -252,6 +287,78 @@ def _kb_query(session_id: str, query: str) -> str:
 
 
 @tool
+def search_real_interview_patterns(session_id: str, query: str = "", stage: str = "", limit: int = 4) -> str:
+    """检索真实面试对话和公开面经，学习主问题、追问链和面试官提问方式。
+
+    返回的是真实提问模式，不是标准答案。生成下一问时应吸收其追问逻辑，并结合当前简历和上一轮回答改写。
+    """
+    if not EXPERIENCE_PATTERNS:
+        return json.dumps({"available": False, "reason": "experience-patterns-not-loaded", "items": []}, ensure_ascii=False)
+    context = get_context(session_id)
+    job = context.get("job") or {}
+    context_text = " ".join([
+        str(job.get("title") or ""),
+        " ".join(_job_skills(session_id)),
+        str(job.get("jobRequirements") or job.get("description") or ""),
+        _resume_text(session_id),
+        query or "",
+    ])
+    wanted_stage = (stage or "").strip()
+    query_tokens = _retrieval_tokens(context_text)
+    explicit_tokens = _retrieval_tokens(query)
+    ranked = []
+    for item in EXPERIENCE_PATTERNS:
+        question_text = " ".join([
+            str(item.get("question") or ""), " ".join(item.get("followUps") or []),
+            item.get("section") or "", " ".join(item.get("tags") or []),
+        ])
+        haystack = " ".join([
+            question_text, item.get("role") or "", item.get("stage") or "",
+        ])
+        item_tokens = _retrieval_tokens(haystack)
+        overlap = len(query_tokens & item_tokens)
+        explicit_overlap = len(explicit_tokens & item_tokens)
+        score = overlap * 1.5 + explicit_overlap * 3.0
+        if wanted_stage and wanted_stage == item.get("stage"):
+            score += 8.0
+        tags = [str(value).lower() for value in (item.get("tags") or [])]
+        if any(tag and tag in context_text.lower() for tag in tags):
+            score += 3.0
+        if score > 0:
+            ranked.append((score, item))
+    ranked.sort(key=lambda pair: (-pair[0], pair[1].get("id", "")))
+    size = max(1, min(int(limit or 4), 6))
+    items = []
+    for score, item in ranked[:size]:
+        items.append({
+            "score": round(score, 2),
+            "id": item.get("id"),
+            "stage": item.get("stage"),
+            "role": item.get("role"),
+            "companyType": item.get("companyType"),
+            "section": item.get("section"),
+            "question": item.get("question"),
+            "followUps": item.get("followUps") or [],
+            "interviewerMoves": item.get("interviewerMoves") or [],
+            "sourceId": item.get("sourceId"),
+            "sourceFile": item.get("sourceFile"),
+            "sourceTitle": item.get("sourceTitle"),
+            "sourceUrl": item.get("sourceUrl"),
+            "level": item.get("level"),
+            "outcome": item.get("outcome"),
+            "usageNote": "借鉴提问方式和追问链，结合当前岗位与候选人回答改写；不得复制候选人答案。",
+        })
+    return json.dumps({
+        "available": True,
+        "count": len(items),
+        "query": context_text[:500],
+        "stageFilter": wanted_stage,
+        "items": items,
+        "attribution": "真实面试资料来自用户提供的公开视频整理稿和公开面经合集。",
+    }, ensure_ascii=False)
+
+
+@tool
 def search_interview_questions_qdrant(session_id: str, query: str = "", stage: str = "", limit: int = 4) -> str:
     """从本地面试题向量库（Qdrant）检索真实面试题与参考答案，返回来源和许可证。
 
@@ -327,6 +434,7 @@ def search_interview_questions_qdrant(session_id: str, query: str = "", stage: s
 AGENT_TOOLS = [
     read_session_context,
     get_job_requirements,
+    search_real_interview_patterns,
     search_question_bank,
     search_interview_questions_qdrant,
     evaluate_candidate_answer,

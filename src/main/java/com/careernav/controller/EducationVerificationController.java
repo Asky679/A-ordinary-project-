@@ -4,6 +4,7 @@ import com.careernav.common.ApiResponse;
 import com.careernav.domain.ApiModels.EducationVerificationResult;
 import com.careernav.service.EducationVerificationService;
 import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -31,6 +32,13 @@ public class EducationVerificationController {
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "ocrText", required = false) String ocrText) {
         return ApiResponse.ok("学历材料一致性核验完成", service.verify(id, file, ocrText));
+    }
+
+    /** 用户取消本次学历验证：删除已保存的核验记录，但不修改简历中的教育背景。 */
+    @DeleteMapping("/{id}/education-verification")
+    public ApiResponse<Void> cancel(@PathVariable Long id) {
+        service.cancel(id);
+        return ApiResponse.ok("学历验证已取消", null);
     }
 
     /** 返回该简历最近一次学历材料核验结果；没有记录时 data 为 null。 */

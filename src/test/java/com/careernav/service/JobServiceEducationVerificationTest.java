@@ -50,6 +50,7 @@ class JobServiceEducationVerificationTest {
         ResumeView resume = new ResumeView(
                 1L, "测试学生", "Java后端开发", "长沙", null, null,
                 "博士", "测试大学", "计算机科学与技术", 2026,
+                null, null, null, null, null, null, null, null,
                 List.of("Java"), List.of(new ProjectItem("测试项目", "后端", "Java", "接口开发", "支持1000用户")),
                 List.<ExperienceItem>of(), "测试简历", "测试简历", List.of(),
                 verificationStatus, verified ? "信息一致" : "未核验",

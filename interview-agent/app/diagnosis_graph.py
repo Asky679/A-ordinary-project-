@@ -18,10 +18,10 @@ from typing import Any
 import requests
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
-from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
 from .config import settings
+from .llm import create_chat_model
 
 API_BASE = os.getenv("CAREERNAV_API_BASE", "http://127.0.0.1:8080/api").rstrip("/")
 EMBEDDING_URL = os.getenv("INTERVIEW_EMBEDDING_URL", "http://127.0.0.1:5002/v1/embeddings")
@@ -203,12 +203,7 @@ class DiagnosisAgent:
         self.llm_enabled = settings.llm_enabled
         self.agent = None
         if self.llm_enabled:
-            model = ChatOpenAI(
-                model=settings.openai_model,
-                api_key=settings.openai_api_key,
-                base_url=settings.openai_base_url,
-                temperature=0.2,
-            )
+            model = create_chat_model(temperature=0.2)
             self.agent = create_react_agent(model, DIAGNOSIS_TOOLS, prompt=SYSTEM_PROMPT)
 
     def status(self) -> dict:

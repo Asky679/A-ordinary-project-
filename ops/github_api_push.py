@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import base64
 import json
+import os
 import pathlib
 import subprocess
 from datetime import datetime, timezone
@@ -11,11 +12,14 @@ REPO = "Asky679/A-ordinary-project-"
 SOURCE = pathlib.Path(r"D:\何处是家乡\new pj")
 BRANCH = "main"
 AUTHOR = {"name": "Asky679", "email": "msh060719@qq.com"}
-EXCLUDED_PARTS = {".git", "target", ".ppt-build", "output", "data", "__pycache__", ".venv", ".idea", ".vscode"}
-EXCLUDED_SUFFIXES = {".exe", ".zip", ".log", ".tmp", ".pyc"}
+EXCLUDED_PARTS = {".git", "target", ".ppt-build", "output", "data", "__pycache__", ".venv", ".idea", ".vscode", ".pytest_cache"}
+EXCLUDED_SUFFIXES = {".exe", ".zip", ".log", ".tmp", ".pyc", ".class"}
 
 
-def token_from_git_credential():
+def github_token():
+    token = (os.environ.get("GITHUB_TOKEN") or "").strip()
+    if token:
+        return token
     result = subprocess.run(
         ["git", "credential", "fill"],
         input="protocol=https\nhost=github.com\n\n",
@@ -26,7 +30,7 @@ def token_from_git_credential():
     values = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
     token = values.get("password")
     if not token:
-        raise RuntimeError("GitHub token not found in Git credential manager")
+        raise RuntimeError("GitHub token not found in GITHUB_TOKEN or Git credential manager")
     return token
 
 
@@ -38,7 +42,7 @@ def api(session, method, path, payload=None):
 
 
 def main():
-    token = token_from_git_credential()
+    token = github_token()
     session = requests.Session()
     session.trust_env = False
     session.headers.update({
@@ -81,12 +85,12 @@ def main():
         if index % 20 == 0:
             print(f"uploaded_blobs={index}")
 
+    # Full snapshot: files removed locally are removed from the public repository too.
     tree = api(session, "POST", f"/repos/{REPO}/git/trees", {
-        "base_tree": parent["tree"]["sha"],
         "tree": entries,
     })
     commit = api(session, "POST", f"/repos/{REPO}/git/commits", {
-        "message": "Add agent-driven job matching and complete CareerNav features",
+        "message": "Sync latest CareerNav implementation (2026-11-06)",
         "tree": tree["sha"],
         "parents": [parent_sha],
         "author": AUTHOR,
