@@ -341,7 +341,7 @@ public class DiagnosisService {
                 .filter(item -> item != null && item.score() < 45)
                 .findFirst().ifPresent(item -> values.add(new DiagnosisSuggestion("P0", "技能面试",
                         item.skill() + " 面试评分仅 " + item.score() + " 分，未达到简历声称的掌握程度",
-                        "围绕基础概念、项目实现、故障边界和方案取舍继续准备，再重新进行技能面试",
+                        "围绕职责边界、业务链路、技术实现、故障边界、方案取舍和结果验证继续准备，再重新进行项目面试",
                         "回答时绑定真实项目、具体技术选择和可验证结果，不要只背定义")));
         if (!resume.educationVerified()) {
             values.add(new DiagnosisSuggestion("P0", "学历真实性",

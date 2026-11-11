@@ -16,6 +16,12 @@ public class InterviewController {
         return ApiResponse.ok(service.latestSkillEvidence(resumeId, jobId));
     }
 
+    /** 预览所选岗位的 JD 面试蓝图，不创建面试会话。 */
+    @GetMapping("/blueprint")
+    public ApiResponse<JobInterviewBlueprint> blueprint(@RequestParam Long jobId) {
+        return ApiResponse.ok(service.blueprint(jobId));
+    }
+
     @GetMapping("/{id}")
     public ApiResponse<InterviewView> get(@PathVariable Long id) { return ApiResponse.ok(service.get(id)); }
 

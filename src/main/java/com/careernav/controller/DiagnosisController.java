@@ -22,7 +22,7 @@ public class DiagnosisController {
     }@GetMapping public ApiResponse<List<DiagnosisReport>> list(@RequestParam(required=false)Long resumeId){return ApiResponse.ok(service.list(resumeId));}@PostMapping public ApiResponse<DiagnosisReport> diagnose(@RequestBody com.careernav.domain.ApiModels.DiagnosisRequest request){
         if (request.jobId() == null) throw new BusinessException("请选择目标岗位后再进行诊断");
         if (evidenceService.latestForResumeAndJob(request.resumeId(), request.jobId()).isEmpty()) {
-            throw new BusinessException("请先完成该岗位的五轮面试，再生成简历诊断分");
+            throw new BusinessException("请先完成该岗位的八轮项目面试，再生成简历诊断分");
         }
         return ApiResponse.ok("简历诊断完成", service.diagnose(request.resumeId(), request.jobId()));
     }@GetMapping("/latest/{resumeId}")public ApiResponse<DiagnosisReport> latest(@PathVariable Long resumeId){return ApiResponse.ok(service.latest(resumeId));}

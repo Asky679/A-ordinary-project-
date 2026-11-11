@@ -90,7 +90,7 @@ def main():
         "tree": entries,
     })
     commit = api(session, "POST", f"/repos/{REPO}/git/commits", {
-        "message": "Sync latest CareerNav implementation (2026-11-06)",
+        "message": "Sync latest CareerNav implementation (2026-11-11)",
         "tree": tree["sha"],
         "parents": [parent_sha],
         "author": AUTHOR,

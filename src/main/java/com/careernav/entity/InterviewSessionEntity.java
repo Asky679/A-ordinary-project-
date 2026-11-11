@@ -12,6 +12,8 @@ public class InterviewSessionEntity {
     private String status; private Integer currentRound; private Integer totalRounds; private Integer overallScore;
     @Column(columnDefinition = "text") private String messagesJson;
     @Column(columnDefinition = "text") private String skillEvidenceJson;
+    @Column(columnDefinition = "text") private String projectEvidenceJson;
+    @Column(columnDefinition = "text") private String jobBlueprintJson;
     private LocalDateTime startedAt; private LocalDateTime updatedAt;
 
     public Long getId() { return id; } public void setId(Long id) { this.id = id; }
@@ -25,6 +27,8 @@ public class InterviewSessionEntity {
     public Integer getOverallScore() { return overallScore; } public void setOverallScore(Integer v) { overallScore = v; }
     public String getMessagesJson() { return messagesJson; } public void setMessagesJson(String v) { messagesJson = v; }
     public String getSkillEvidenceJson() { return skillEvidenceJson; } public void setSkillEvidenceJson(String v) { skillEvidenceJson = v; }
+    public String getProjectEvidenceJson() { return projectEvidenceJson; } public void setProjectEvidenceJson(String v) { projectEvidenceJson = v; }
+    public String getJobBlueprintJson() { return jobBlueprintJson; } public void setJobBlueprintJson(String v) { jobBlueprintJson = v; }
     public LocalDateTime getStartedAt() { return startedAt; } public void setStartedAt(LocalDateTime v) { startedAt = v; }
     public LocalDateTime getUpdatedAt() { return updatedAt; } public void setUpdatedAt(LocalDateTime v) { updatedAt = v; }
 }

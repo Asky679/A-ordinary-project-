@@ -1,5 +1,7 @@
 package com.careernav.service;
 
+import com.careernav.domain.ApiModels.InterviewProjectEvidence;
+import com.careernav.domain.ApiModels.JobInterviewBlueprint;
 import com.careernav.domain.ApiModels.JobView;
 import com.careernav.domain.ApiModels.ResumeView;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -53,7 +55,8 @@ public class LangGraphInterviewClient {
         }
     }
 
-    public AgentTurn start(Long sessionId, ResumeView resume, JobView job, String difficulty) {
+    public AgentTurn start(Long sessionId, ResumeView resume, JobView job, String difficulty,
+                            InterviewProjectEvidence projectEvidence, JobInterviewBlueprint jobBlueprint) {
         if (!enabled) return null;
         try {
             Map<String, Object> body = new LinkedHashMap<>();
@@ -61,6 +64,8 @@ public class LangGraphInterviewClient {
             body.put("resume", resumeContext(resume));
             body.put("job", jobContext(job));
             body.put("difficulty", difficulty);
+            body.put("projectEvidence", projectEvidence);
+            body.put("jobBlueprint", jobBlueprint);
             return parse(post("/v1/interviews/start", body));
         } catch (Exception exception) {
             log.warn("LangGraph start failed: {}", exception.getMessage());
@@ -68,13 +73,16 @@ public class LangGraphInterviewClient {
         }
     }
 
-    public AgentTurn answer(Long sessionId, String answer, ResumeView resume, JobView job) {
+    public AgentTurn answer(Long sessionId, String answer, ResumeView resume, JobView job,
+                            InterviewProjectEvidence projectEvidence, JobInterviewBlueprint jobBlueprint) {
         if (!enabled) return null;
         try {
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("answer", answer);
             body.put("resume", resumeContext(resume));
             body.put("job", jobContext(job));
+            body.put("projectEvidence", projectEvidence);
+            body.put("jobBlueprint", jobBlueprint);
             return parse(post("/v1/interviews/" + sessionId + "/answer", body));
         } catch (Exception exception) {
             log.warn("LangGraph answer failed: {}", exception.getMessage());

@@ -14,6 +14,7 @@ import java.util.stream.Collectors;
 
 @Service
 public class InterviewService {
+    private static final int TOTAL_ROUNDS = 8;
     private final InterviewSessionRepository repository;
     private final ResumeService resumeService;
     private final JobService jobService;
@@ -21,11 +22,13 @@ public class InterviewService {
     private final AgentModelClient agentModelClient;
     private final LangGraphInterviewClient langGraphClient;
     private final InterviewSkillEvidenceService skillEvidenceService;
+    private final JobInterviewBlueprintService blueprintService;
 
     public InterviewService(InterviewSessionRepository repository, ResumeService resumeService,
                             JobService jobService, JsonCodec jsonCodec,
                             AgentModelClient agentModelClient, LangGraphInterviewClient langGraphClient,
-                            InterviewSkillEvidenceService skillEvidenceService) {
+                            InterviewSkillEvidenceService skillEvidenceService,
+                            JobInterviewBlueprintService blueprintService) {
         this.repository = repository;
         this.resumeService = resumeService;
         this.jobService = jobService;
@@ -33,6 +36,7 @@ public class InterviewService {
         this.agentModelClient = agentModelClient;
         this.langGraphClient = langGraphClient;
         this.skillEvidenceService = skillEvidenceService;
+        this.blueprintService = blueprintService;
     }
 
     @Transactional
@@ -41,8 +45,10 @@ public class InterviewService {
         JobView job = jobService.get(request.jobId());
         String difficulty = request.difficulty() == null || request.difficulty().isBlank()
                 ? "标准" : request.difficulty();
+        InterviewProjectEvidence projectEvidence = projectEvidence(request.projectEvidence(), resume);
+        JobInterviewBlueprint jobBlueprint = blueprintService.build(job, resume);
         List<InterviewMessage> messages = new ArrayList<>();
-        messages.add(new InterviewMessage("assistant", firstQuestion(resume, job, difficulty),
+        messages.add(new InterviewMessage("assistant", firstQuestion(resume, job, difficulty, projectEvidence),
                 LocalDateTime.now(), null, null));
 
         InterviewSessionEntity entity = new InterviewSessionEntity();
@@ -52,15 +58,17 @@ public class InterviewService {
         entity.setDifficulty(difficulty);
         entity.setStatus("IN_PROGRESS");
         entity.setCurrentRound(1);
-        entity.setTotalRounds(5);
+        entity.setTotalRounds(TOTAL_ROUNDS);
         entity.setOverallScore(0);
         entity.setMessagesJson(jsonCodec.write(messages));
+        entity.setProjectEvidenceJson(jsonCodec.write(projectEvidence));
+        entity.setJobBlueprintJson(jsonCodec.write(jobBlueprint));
         entity.setStartedAt(LocalDateTime.now());
         entity.setUpdatedAt(entity.getStartedAt());
         entity = repository.save(entity);
 
         if (langGraphClient.available()) {
-            LangGraphInterviewClient.AgentTurn turn = langGraphClient.start(entity.getId(), resume, job, difficulty);
+            LangGraphInterviewClient.AgentTurn turn = langGraphClient.start(entity.getId(), resume, job, difficulty, projectEvidence, jobBlueprint);
             if (turn != null && turn.question() != null && !turn.question().isBlank()) {
                 List<InterviewMessage> agentMessages = new ArrayList<>();
                 agentMessages.add(new InterviewMessage("assistant", turn.question(), LocalDateTime.now(), null, null));
@@ -83,9 +91,11 @@ public class InterviewService {
                 jsonCodec.readList(entity.getMessagesJson(), InterviewMessage.class));
         JobView job = jobService.get(entity.getJobId());
         ResumeView resume = resumeService.get(entity.getResumeId());
+        InterviewProjectEvidence projectEvidence = readProjectEvidence(entity, resume);
+        JobInterviewBlueprint jobBlueprint = readJobBlueprint(entity);
 
         if (langGraphClient.available()) {
-            LangGraphInterviewClient.AgentTurn turn = langGraphClient.answer(id, answer, resume, job);
+            LangGraphInterviewClient.AgentTurn turn = langGraphClient.answer(id, answer, resume, job, projectEvidence, jobBlueprint);
             if (turn != null) {
                 int score = turn.score() == null ? 0 : Math.max(0, Math.min(100, turn.score()));
                 String feedback = turn.feedback() == null || turn.feedback().isBlank()
@@ -98,7 +108,7 @@ public class InterviewService {
                 entity.setOverallScore((int) Math.round(
                         (oldTotal * (answered - 1) + score) / (double) answered));
 
-                if (turn.done() || answered >= entity.getTotalRounds()) {
+                if (answered >= entity.getTotalRounds()) {
                     entity.setStatus("COMPLETED");
                     entity.setCurrentRound(entity.getTotalRounds());
                     saveSkillEvidence(entity, resume, job, messages);
@@ -155,6 +165,10 @@ public class InterviewService {
         return skillEvidenceService.latestForResumeAndJob(resumeId, jobId);
     }
 
+    public JobInterviewBlueprint blueprint(Long jobId) {
+        return blueprintService.build(jobService.get(jobId), null);
+    }
+
     @Transactional(readOnly = true)
     public InterviewView get(Long id) {
         return toView(getEntity(id));
@@ -175,27 +189,31 @@ public class InterviewService {
         return repository.findById(id).orElseThrow(() -> new BusinessException("面试记录不存在：" + id));
     }
 
-    private String firstQuestion(ResumeView resume, JobView job, String difficulty) {
-        String primarySkill = job.skills().stream().filter(skill -> skill != null && !skill.isBlank())
-                .findFirst().orElse("岗位核心技能");
+    private String firstQuestion(ResumeView resume, JobView job, String difficulty,
+                                 InterviewProjectEvidence evidence) {
+        String project = evidence == null || evidence.projectName() == null || evidence.projectName().isBlank()
+                ? (resume.projects().isEmpty() ? "你的代表项目" : resume.projects().getFirst().name())
+                : evidence.projectName();
+        String role = evidence == null || evidence.role() == null || evidence.role().isBlank()
+                ? "你本人负责的模块" : evidence.role();
         String fallback = String.format(
-                "你好，欢迎参加“%s”岗位模拟面试，本轮强度为%s。第一轮先验证基础概念：请解释 %s 的核心原理、常见使用场景和一个容易出错的边界，并尽量结合你真正写过的代码，不要只背定义。",
-                job.title(), difficulty, primarySkill);
+                "你好，欢迎参加“%s”岗位模拟面试，本轮强度为%s。第一轮先聚焦项目职责：请用两分钟介绍“%s”，重点说明项目背景、团队规模、你负责的模块，以及哪些工作是你独立完成的。如果需要描述企业项目，只讲脱敏后的模块和业务，不需要提供源码或公司敏感信息。",
+                job.title(), difficulty, project);
         String aiQuestion = agentModelClient.generate("""
-                你是计算机校园招聘的专业面试官。请根据以下信息生成第一轮基础概念问题。
+                你是计算机校园招聘的专业面试官。请根据以下信息生成第一轮项目职责问题。
                 岗位：%s
                 岗位技能：%s
                 候选人目标：%s
-                代表项目：%s
+                项目证据卡：%s
                 面试强度：%s
 
                 要求：
-                1. 直接提出一个能验证岗位核心技能基础理解的问题，不要用自我介绍占用验证轮次。
-                2. 要求候选人解释原理、适用场景和至少一个边界或易错点。
-                3. 只能依据给出的岗位与简历事实，不得预设候选人做过线上系统。
-                4. 只输出面试官要说的话，控制在 120 字以内，不要解释生成过程。
+                1. 第一轮围绕项目背景、团队规模、个人职责和模块边界提问，不要先问八股。
+                2. 企业项目可能涉密，明确允许候选人使用脱敏模块名称，不要要求源码或内部数据。
+                3. 问题必须引用项目证据卡中的项目名称或角色，不能问泛泛的“介绍一下自己”。
+                4. 只输出面试官要说的话，控制在 120 字以内。
                 """.formatted(job.title(), String.join("、", job.skills()), resume.targetRole(),
-                resume.projects().isEmpty() ? "暂无项目" : resume.projects().getFirst().name(), difficulty));
+                jsonCodec.write(evidence), difficulty));
         return aiQuestion == null ? fallback : clip(aiQuestion, 500);
     }
 
@@ -206,18 +224,15 @@ public class InterviewService {
         String skill = missing.isEmpty()
                 ? job.skills().stream().filter(item -> item != null && !item.isBlank()).findFirst().orElse("岗位核心技能")
                 : missing.getFirst();
+        String project = resume.projects().isEmpty() ? "你的代表项目" : resume.projects().getFirst().name();
         return switch (round) {
-            case 2 -> {
-                String project = resume.projects().isEmpty() ? "你最有代表性的项目" : resume.projects().getFirst().name();
-                yield "第二轮验证项目实现：请以“" + project + "”为例，说明 " + skill
-                        + " 具体用在哪段流程、你本人负责什么、关键代码或数据如何流转。";
-            }
-            case 3 -> "第三轮验证故障与边界：如果使用 " + skill
-                    + " 的这条流程遇到异常输入、并发冲突或依赖不可用，你会如何定位并处理？请说明判断依据。";
-            case 4 -> "第四轮验证方案取舍：在 " + skill
-                    + " 的实现中你做过什么技术选择？请对比至少一个替代方案，并说明为什么选当前方案。";
-            case 5 -> "最后一轮验证结果：你如何证明 " + skill
-                    + " 相关功能确实有效？请说明验证方法、基线、结果和你个人能负责的范围，没有量化数据就说明功能验证过程。";
+            case 2 -> "请选一条项目最核心的端到端业务链路，按用户请求、服务处理、数据变化和返回结果讲清楚，并说明你负责哪一段。";
+            case 3 -> "接下来验证技术实现：请说明 " + skill + " 在“" + project + "”中的具体落点、关键数据结构，以及你亲手实现的部分。";
+            case 4 -> "如果这条链路遇到异常输入、并发冲突、超时或依赖不可用，你会怎么定位、隔离和恢复？请说明判断依据。";
+            case 5 -> "请说明你在项目中做过的一个技术取舍：当时有哪些替代方案，你为什么选当前方案，又牺牲了什么？";
+            case 6 -> "请说明项目成果和验证方式：基线是什么、怎么测试、数据如何得到，以及你个人能对哪些结果负责。";
+            case 7 -> "请补强一个刚才没有讲透的点：如果面试官继续追问你的个人贡献、边界情况或验证证据，你会怎么回答？";
+            case 8 -> "最后一个问题：如果项目规模扩大10倍或增加一项新需求，你会如何调整当前设计？";
             default -> "请结合岗位要求，说明你还能提供哪项可验证的技术证据。";
         };
     }
@@ -253,7 +268,7 @@ public class InterviewService {
                 候选人技能自述：%s
                 候选项目自述：%s
                 当前轮次：%d / %d
-                本场验证阶段依次为：基础概念、项目实现、故障与边界、方案取舍、结果验证。
+                本场验证阶段依次为：职责边界、业务链路、技术实现、故障与边界、方案取舍、结果验证、证据补强、迁移验证。
                 候选人回答：
                 <<<%s>>>
 
@@ -282,7 +297,8 @@ public class InterviewService {
     private void saveSkillEvidence(InterviewSessionEntity entity, ResumeView resume, JobView job,
                                     List<InterviewMessage> messages) {
         int overall = entity.getOverallScore() == null ? 0 : entity.getOverallScore();
-        List<InterviewSkillEvidence> evidence = skillEvidenceService.assess(resume, job, messages, overall);
+        List<InterviewSkillEvidence> evidence = skillEvidenceService.assess(resume, job, messages, overall,
+                readProjectEvidence(entity, resume), readJobBlueprint(entity));
         entity.setSkillEvidenceJson(jsonCodec.write(evidence));
     }
 
@@ -290,11 +306,51 @@ public class InterviewService {
         return new InterviewView(entity.getId(), entity.getResumeId(), entity.getJobId(), entity.getJobTitle(),
                 entity.getDifficulty(), entity.getStatus(),
                 entity.getCurrentRound() == null ? 0 : entity.getCurrentRound(),
-                entity.getTotalRounds() == null ? 4 : entity.getTotalRounds(),
+                entity.getTotalRounds() == null ? TOTAL_ROUNDS : entity.getTotalRounds(),
                 entity.getOverallScore() == null ? 0 : entity.getOverallScore(),
                 jsonCodec.readList(entity.getMessagesJson(), InterviewMessage.class),
                 jsonCodec.readList(entity.getSkillEvidenceJson(), InterviewSkillEvidence.class),
+                readProjectEvidence(entity, null),
+                readJobBlueprint(entity),
                 entity.getStartedAt(), entity.getUpdatedAt());
+    }
+
+    private InterviewProjectEvidence projectEvidence(InterviewProjectEvidence supplied, ResumeView resume) {
+        ProjectItem project = resume.projects().isEmpty() ? null : resume.projects().getFirst();
+        String fallbackName = project == null ? "待确认项目" : safe(project.name());
+        String fallbackRole = project == null ? "" : safe(project.role());
+        String fallbackTech = project == null ? "" : safe(project.techStack());
+        String fallbackDescription = project == null ? "" : safe(project.description());
+        String fallbackChallenge = project == null ? "" : safe(project.challenge());
+        String fallbackResult = project == null ? "" : safe(project.highlight());
+        return new InterviewProjectEvidence(
+                preferred(supplied == null ? null : supplied.projectName(), fallbackName),
+                preferred(supplied == null ? null : supplied.role(), fallbackRole),
+                clip(supplied == null ? "" : safe(supplied.teamSize()), 80),
+                preferred(supplied == null ? null : supplied.businessFlow(), fallbackDescription),
+                preferred(supplied == null ? null : supplied.techStack(), fallbackTech),
+                preferred(supplied == null ? null : supplied.implementation(), fallbackDescription),
+                preferred(supplied == null ? null : supplied.challenge(), fallbackChallenge),
+                preferred(supplied == null ? null : supplied.resultEvidence(), fallbackResult),
+                preferred(supplied == null ? null : supplied.confidentiality(), "企业保密项目"),
+                clip(supplied == null ? "" : safe(supplied.notes()), 1000)
+        );
+    }
+
+    private InterviewProjectEvidence readProjectEvidence(InterviewSessionEntity entity, ResumeView resume) {
+        InterviewProjectEvidence stored = jsonCodec.read(entity.getProjectEvidenceJson(), InterviewProjectEvidence.class);
+        if (stored != null) return stored;
+        if (resume == null) return null;
+        return projectEvidence(null, resume);
+    }
+
+    private String preferred(String value, String fallback) {
+        String clean = safe(value).trim();
+        return clip(clean.isBlank() ? safe(fallback) : clean, 1200);
+    }
+
+    private JobInterviewBlueprint readJobBlueprint(InterviewSessionEntity entity) {
+        return jsonCodec.read(entity.getJobBlueprintJson(), JobInterviewBlueprint.class);
     }
 
     private String safe(String value) {

@@ -1,6 +1,8 @@
 package com.careernav.service;
 
 import com.careernav.domain.ApiModels.InterviewMessage;
+import com.careernav.domain.ApiModels.InterviewProjectEvidence;
+import com.careernav.domain.ApiModels.JobInterviewBlueprint;
 import com.careernav.domain.ApiModels.InterviewSkillEvidence;
 import com.careernav.domain.ApiModels.JobView;
 import com.careernav.domain.ApiModels.ResumeView;
@@ -18,6 +20,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.regex.Pattern;
 
 /**
  * 将面试记录转换为技能熟练度证据，并在简历诊断中复用。
@@ -39,12 +42,22 @@ public class InterviewSkillEvidenceService {
     }
 
     public List<InterviewSkillEvidence> assess(ResumeView resume, JobView job,
-                                               List<InterviewMessage> messages, int overallScore) {
-        Set<String> skills = targetSkills(resume, job);
+                                               List<InterviewMessage> messages, int overallScore,
+                                               InterviewProjectEvidence projectEvidence) {
+        return assess(resume, job, messages, overallScore, projectEvidence, null);
+    }
+
+    public List<InterviewSkillEvidence> assess(ResumeView resume, JobView job,
+                                               List<InterviewMessage> messages, int overallScore,
+                                               InterviewProjectEvidence projectEvidence,
+                                               JobInterviewBlueprint jobBlueprint) {
         List<InterviewMessage> safeMessages = messages == null ? List.of() : messages;
         String transcript = transcript(safeMessages);
+        Set<String> skills = targetSkills(resume, job, transcript, jobBlueprint);
+        if (skills.isEmpty()) return List.of();
         List<InterviewSkillEvidence> assessed = model == null || !model.available()
-                ? List.of() : assessWithModel(skills, safe(resume == null ? null : resume.skills()), transcript, safeMessages);
+                ? List.of() : assessWithModel(skills, safe(resume == null ? null : resume.skills()),
+                        transcript, safeMessages, projectEvidence);
         if (assessed.isEmpty()) assessed = fallback(skills, transcript, safeMessages, overallScore);
         return assessed;
     }
@@ -67,8 +80,12 @@ public class InterviewSkillEvidenceService {
         Map<String, InterviewSkillEvidence> latest = new LinkedHashMap<>();
         for (InterviewSessionEntity session : sessions) {
             List<InterviewSkillEvidence> rows = jsonCodec.readList(session.getSkillEvidenceJson(), InterviewSkillEvidence.class);
+            String sessionTranscript = transcript(jsonCodec.readList(
+                    session.getMessagesJson(), InterviewMessage.class));
             for (InterviewSkillEvidence row : rows) {
                 if (row == null || row.skill() == null || row.skill().isBlank()) continue;
+                // Old sessions may contain rows for resume skills that were never asked in this interview.
+                if (!row.verified() && !skillMentioned(row.skill(), sessionTranscript)) continue;
                 String key = normalize(row.skill());
                 InterviewSkillEvidence old = latest.get(key);
                 if (old == null || (row.updatedAt() != null && (old.updatedAt() == null || row.updatedAt().isAfter(old.updatedAt())))) {
@@ -80,24 +97,28 @@ public class InterviewSkillEvidenceService {
     }
 
     private List<InterviewSkillEvidence> assessWithModel(Set<String> skills, List<String> resumeSkills,
-                                                          String transcript, List<InterviewMessage> messages) {
+                                                          String transcript, List<InterviewMessage> messages,
+                                                          InterviewProjectEvidence projectEvidence) {
         String prompt = """
                 你是计算机岗位的技能面试验证器。请只评估下面岗位要求中的技能。
                 技能列表：%s
                 候选人简历技能：%s
+                脱敏项目证据卡：%s
+                岗位面试蓝图：%s
                 面试记录：
                 <<<%s>>>
 
                 规则：
                 1. 必须结合候选人的实际回答判断，不能因为简历自述就判定熟练掌握。
-                2. 基础概念、项目证据、故障边界和方案取舍都需要有回答证据。
-                3. 按基础概念、项目实现、故障边界、方案取舍、结果验证五个方面综合判断。
+                2. 职责边界、业务链路、技术实现、故障边界、方案取舍和结果验证都需要有回答证据。
+                3. 技能证据必须能和项目证据卡中的角色、业务链路、实现、难点和结果相互印证。
                 4. 技术概念错误、只有关键词或只有简历复述不能算已掌握。
                 5. 每个技能给 0-100 分、0-1 置信度和最多 3 条可复核的回答证据。
                 6. 未在面试中形成有效证据的技能，分数不超过 40，并明确写“面试未形成明确证据”。
                 7. 不得编造候选人没有说过的经历或数字。
                 8. 只返回 JSON：{"skills":[{"skill":"Java","score":72,"confidence":0.7,"evidence":["..."]}]}
-                """.formatted(String.join("、", skills), String.join("、", resumeSkills), clip(transcript, 6500));
+                """.formatted(String.join("、", skills), String.join("、", resumeSkills),
+                projectEvidenceText(projectEvidence), blueprintText(jobBlueprint), clip(transcript, 6500));
         ModelBatch batch = model.generateJson(prompt, ModelBatch.class);
         if (batch == null || batch.skills() == null) return List.of();
         Map<String, String> actual = skills.stream().collect(Collectors.toMap(this::normalize, value -> value, (a, b) -> a, LinkedHashMap::new));
@@ -125,28 +146,72 @@ public class InterviewSkillEvidenceService {
         int answerCount = (int) messages.stream().filter(item -> "user".equals(item.role())).count();
         List<InterviewSkillEvidence> result = new ArrayList<>();
         for (String skill : skills) {
-            boolean mentioned = text.contains(normalize(skill));
-            int score = mentioned ? Math.min(55, Math.max(35, fixedScore)) : 0;
-            double confidence = mentioned ? (answerCount >= 3 ? 0.5 : 0.35) : 0.25;
-            List<String> evidence = mentioned
-                    ? List.of("面试回答中提及该技能；当前为规则汇总，建议人工复核")
-                    : List.of("面试中未形成明确技能证据");
+            if (!skillMentioned(skill, transcript)) continue;
+            int score = Math.min(55, Math.max(35, fixedScore));
+            double confidence = answerCount >= 3 ? 0.5 : 0.35;
+            List<String> evidence = List.of("面试回答中提及该技能；当前为规则汇总，建议人工复核");
             result.add(new InterviewSkillEvidence(skill, score, level(score), confidence, false,
                     "INTERVIEW_FALLBACK", evidence, LocalDateTime.now()));
         }
         return result;
     }
 
-    private Set<String> targetSkills(ResumeView resume, JobView job) {
-        LinkedHashSet<String> result = new LinkedHashSet<>();
+    private String blueprintText(JobInterviewBlueprint blueprint) {
+        if (blueprint == null) return "未提供";
+        return String.join("；",
+                "方向=" + safeText(blueprint.roleDirection()),
+                "级别=" + safeText(blueprint.seniority()),
+                "必备技能=" + String.join("、", blueprint.mustHaveSkills() == null ? List.of() : blueprint.mustHaveSkills()),
+                "核心职责=" + String.join("、", blueprint.coreResponsibilities() == null ? List.of() : blueprint.coreResponsibilities()),
+                "面试场景=" + String.join("、", blueprint.interviewScenarios() == null ? List.of() : blueprint.interviewScenarios()));
+    }
+
+    private String projectEvidenceText(InterviewProjectEvidence evidence) {
+        if (evidence == null) return "未提供";
+        return String.join("；", List.of(
+                "项目=" + safeText(evidence.projectName()),
+                "角色=" + safeText(evidence.role()),
+                "团队=" + safeText(evidence.teamSize()),
+                "业务链路=" + safeText(evidence.businessFlow()),
+                "技术栈=" + safeText(evidence.techStack()),
+                "关键实现=" + safeText(evidence.implementation()),
+                "难点=" + safeText(evidence.challenge()),
+                "结果证据=" + safeText(evidence.resultEvidence()),
+                "信息范围=" + safeText(evidence.confidentiality())));
+    }
+
+    private String safeText(String value) { return value == null || value.isBlank() ? "未提供" : value.trim(); }
+
+    private Set<String> targetSkills(ResumeView resume, JobView job, String transcript,
+                                     JobInterviewBlueprint blueprint) {
+        LinkedHashSet<String> candidates = new LinkedHashSet<>();
+        if (blueprint != null) {
+            if (blueprint.mustHaveSkills() != null) blueprint.mustHaveSkills().forEach(candidates::add);
+            if (blueprint.niceToHaveSkills() != null) blueprint.niceToHaveSkills().forEach(candidates::add);
+        }
         if (job != null && job.skills() != null) {
-            job.skills().stream().filter(value -> value != null && !value.isBlank()).limit(8).forEach(result::add);
+            job.skills().stream().filter(value -> value != null && !value.isBlank()).limit(12).forEach(candidates::add);
         }
-        if (result.isEmpty() && resume != null && resume.skills() != null) {
-            resume.skills().stream().filter(value -> value != null && !value.isBlank()).limit(6).forEach(result::add);
+        if (resume != null && resume.skills() != null) {
+            resume.skills().stream().filter(value -> value != null && !value.isBlank()).limit(20).forEach(candidates::add);
         }
-        if (result.isEmpty()) result.add("通用技术基础");
-        return result;
+        // Only skills that actually appeared in this interview are eligible for interview evidence.
+        return candidates.stream()
+                .filter(value -> value != null && !value.isBlank())
+                .filter(skill -> skillMentioned(skill, transcript))
+                .limit(10)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private boolean skillMentioned(String skill, String text) {
+        if (skill == null || skill.isBlank() || text == null || text.isBlank()) return false;
+        String cleanSkill = skill.trim();
+        if (cleanSkill.matches(".*[\u4e00-\u9fff].*")) {
+            return normalize(text).contains(normalize(cleanSkill));
+        }
+        return Pattern.compile("(?i)(?<![A-Za-z0-9])" + Pattern.quote(cleanSkill)
+                        + "(?![A-Za-z0-9])")
+                .matcher(text).find();
     }
 
     private String transcript(List<InterviewMessage> messages) {

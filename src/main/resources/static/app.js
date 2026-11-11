@@ -9,7 +9,8 @@ const state = {
   cityJobs: [], cityTotal: 0, cityPage: 0, cityLoading: false,
   cityRequestId: 0, citySearchTimer: null, interviewEvidence: [], interviewEvidenceLoading: false,
   ahpProfile: null, resumeImport: null, educationReport: null, projectQuestionSet: null, projectQuestionStatus: {},
-  projectQuestionDescription: '', projectAnswers: {}, projectFollowUps: {}, projectFollowUpLoading: {}
+  projectQuestionDescription: '', projectAnswers: {}, projectFollowUps: {}, projectFollowUpLoading: {},
+  jobBlueprint: null, jobBlueprintLoading: false, jobBlueprintCache: new Map()
 };
 const pageTitles = { dashboard:'成长总览', resume:'简历工坊', library:'简历仓库', jobs:'岗位雷达', interview:'模拟面试', diagnosis:'简历诊断', 'project-questions':'项目面试助手' };
 const $ = (selector, root=document) => root.querySelector(selector);
@@ -51,7 +52,7 @@ function navigate(view) {
   if (view === 'resume') { const resume = primaryResume(); if (resume && !$('#resume-id').value) fillResumeForm(resume); }
   if (view === 'library') renderResumeLibrary();
   if (view === 'jobs') renderJobs();
-  if (view === 'interview') populateInterviewOptions();
+  if (view === 'interview') { populateInterviewOptions(); setTimeout(restoreLatestInterview, 80); }
   if (view === 'diagnosis') populateDiagnosisOptions();
   window.scrollTo({ top:0, behavior:'smooth' });
 }
@@ -129,6 +130,7 @@ function populateAllSelects() {
   if (state.activeJobId && [...$('#diagnosis-job').options].some(option => option.value === String(state.activeJobId))) {
     $('#diagnosis-job').value = String(state.activeJobId);
   }
+  populateProjectEvidenceProjects();
 }
 function hideInterviewDiagnosis() {
   state.diagnosis = null;
@@ -144,9 +146,9 @@ function resetInterviewWorkspace(status='尚未开始') {
   const statusNode = $('#interview-status');
   if (statusNode) { statusNode.textContent = status; statusNode.className = 'session-status'; }
   const messages = $('#chat-messages');
-  if (messages) messages.innerHTML = '<div class="chat-empty"><div class="empty-orbit">AI</div><h3>选择岗位后开始面试</h3><p>五轮回答会形成面试证据，完成后解锁简历诊断。</p></div>';
+  if (messages) messages.innerHTML = '<div class="chat-empty"><div class="empty-orbit">AI</div><h3>选择岗位后开始面试</h3><p>八轮项目追问会形成职责、链路、实现和结果证据，完成后解锁简历诊断。</p></div>';
   if ($('#chat-job-title')) $('#chat-job-title').textContent = '等待选择目标岗位';
-  if ($('#round-text')) $('#round-text').textContent = '0 / 5';
+  if ($('#round-text')) $('#round-text').textContent = '0 / 8';
   if ($('#round-bar')) $('#round-bar').style.width = '0%';
   if ($('#send-answer')) $('#send-answer').disabled = false;
   if ($('#interview-answer')) $('#interview-answer').disabled = false;
@@ -184,7 +186,7 @@ async function populateDiagnosisOptions() {
   if (!jobId) { renderDiagnosisLocked('请选择目标岗位，并完成该岗位的模拟面试。'); return; }
   const evidence = await loadInterviewEvidence(resumeId, jobId);
   if (evidence.length) renderDiagnosisUnlocked(evidence);
-  else renderDiagnosisLocked('当前简历和岗位没有已完成面试。请先完成五轮模拟面试，再查看最终诊断。');
+  else renderDiagnosisLocked('当前简历和岗位没有已完成面试。请先完成八轮项目模拟面试，再查看最终诊断。');
 }
 function restoreMatchPreferences() {
   try {
@@ -809,9 +811,9 @@ function renderInterviewEvidenceBlock(report) {
   const summary = state.interviewEvidenceLoading
     ? '正在读取最近一场面试的技能证据…'
     : cards
-      ? '以下分数来自候选人真实回答，只用于最终诊断和补强建议，不会反向否定简历中已填写的技能；它不是官方技能认证。'
+      ? '只显示本场岗位要求或面试中实际触及的技能；未考察技能不会显示为未通过，也不参与本场技能扣分。面试评分用于诊断和补强建议，不是官方认证。'
       : hasJob
-        ? '当前岗位还没有完成的技能面试。先参加五轮面试，Agent 才会判断你能否用回答证明简历中的技能。'
+        ? '本场面试没有形成可验证的技能证据；未被岗位要求或面试问题触及的简历技能不会显示为未通过。'
         : '请选择一个具体岗位后，再进行技能面试验证。';
   return `<section class="diagnosis-interview-evidence">
     <div class="interview-evidence-head">
@@ -831,6 +833,44 @@ function interviewResumeLabel(resumeId) {
 function interviewJobLabel(jobId) {
   const job = state.jobs.find(item => item.id === Number(jobId));
   return job ? `${job.title} · ${job.company}` : '当前诊断岗位';
+}
+async function loadInterviewBlueprint(jobId) {
+  const id = Number(jobId || 0);
+  const panel = $('#interview-blueprint-panel');
+  if (!panel) return;
+  if (!id) {
+    state.jobBlueprint = null;
+    panel.innerHTML = '<div class="interview-blueprint-head"><span class="eyebrow">JD INTERVIEW BLUEPRINT</span><b>JD 面试蓝图</b></div><p>选择岗位后，从岗位库中的技能、职责、经验和行业数据生成。</p>';
+    return;
+  }
+  const cached = state.jobBlueprintCache.get(id);
+  if (cached) { state.jobBlueprint = cached; renderInterviewBlueprint(cached); return; }
+  state.jobBlueprintLoading = true;
+  panel.innerHTML = '<div class="interview-blueprint-head"><span class="eyebrow">JD INTERVIEW BLUEPRINT</span><b>JD 面试蓝图</b></div><p>正在从岗位 JD 提取必备技能、职责和面试场景…</p>';
+  try {
+    const blueprint = await api(`/api/interviews/blueprint?jobId=${id}`);
+    state.jobBlueprintCache.set(id, blueprint);
+    if (Number($('#interview-job')?.value || state.activeJobId) === id) {
+      state.jobBlueprint = blueprint;
+      renderInterviewBlueprint(blueprint);
+    }
+  } catch (error) {
+    panel.innerHTML = `<div class="interview-blueprint-head"><span class="eyebrow">JD INTERVIEW BLUEPRINT</span><b>JD 面试蓝图</b></div><p>岗位蓝图读取失败：${escapeHtml(error.message)}</p>`;
+  } finally { state.jobBlueprintLoading = false; }
+}
+function renderInterviewBlueprint(blueprint) {
+  const panel = $('#interview-blueprint-panel');
+  if (!panel || !blueprint) return;
+  const must = (blueprint.mustHaveSkills || []).slice(0, 6).map(item => `<span>${escapeHtml(item)}</span>`).join('');
+  const responsibilities = (blueprint.coreResponsibilities || []).slice(0, 3).join('；');
+  const scenarios = (blueprint.interviewScenarios || []).slice(0, 4).join('；');
+  const constraints = (blueprint.hardConstraints || []).slice(0, 3).join('；');
+  panel.innerHTML = `<div class="interview-blueprint-head"><span class="eyebrow">JD INTERVIEW BLUEPRINT</span><b>JD 面试蓝图</b></div>
+    <div class="blueprint-tags">${must || '<span class="warn">岗位未明确技能，将按职责场景提问</span>'}</div>
+    ${responsibilities ? `<div class="blueprint-section"><b>核心职责</b><p>${escapeHtml(responsibilities)}</p></div>` : ''}
+    ${scenarios ? `<div class="blueprint-section"><b>面试场景</b><p>${escapeHtml(scenarios)}</p></div>` : ''}
+    ${constraints ? `<div class="blueprint-section"><b>硬性条件</b><p>${escapeHtml(constraints)}</p></div>` : ''}
+    <p>${escapeHtml(blueprint.sourceSummary || '来自岗位 JD 和岗位库数据')}</p>`;
 }
 function renderInterviewJobFocus(jobId) {
   const box = $('#interview-focus-tags');
@@ -855,7 +895,89 @@ function renderInterviewJobFocus(jobId) {
   box.innerHTML = ranked.length
     ? ranked.map(skill => `<span>${escapeHtml(skill)}</span>`).join('')
     : '<small>岗位技能信息不足，将根据岗位职责继续分析</small>';
+  loadInterviewBlueprint(jobId);
 }
+/* ---------- 脱敏项目证据卡 ---------- */
+function evidenceResume() {
+  const id = Number($('#interview-resume')?.value || state.activeResumeId);
+  return state.resumes.find(item => Number(item.id) === id) || null;
+}
+function populateProjectEvidenceProjects(force=false) {
+  const select = $('#interview-project-select');
+  if (!select) return;
+  const projects = (evidenceResume()?.projects || []).map((project, index) => ({...project, _evidenceIndex:index}));
+  const previous = select.value;
+  if (!projects.length) {
+    select.innerHTML = '<option value="">简历暂无项目，可手动填写</option>';
+    if (force || !$('#evidence-project-name').value.trim()) fillProjectEvidence(null);
+    return;
+  }
+  select.innerHTML = projects.map(item => `<option value="${item._evidenceIndex}">${escapeHtml(item.name || `项目 ${item._evidenceIndex + 1}`)}</option>`).join('');
+  select.value = [...select.options].some(option => option.value === previous) ? previous : '0';
+  const name = $('#evidence-project-name');
+  if (force || !name.value.trim()) fillProjectEvidence(projects[Number(select.value) || 0]);
+}
+function fillProjectEvidence(project) {
+  const value = key => project && project[key] ? String(project[key]) : '';
+  const set = (selector, content) => { const node = $(selector); if (node) node.value = content || ''; };
+  set('#evidence-project-name', value('name'));
+  set('#evidence-role', value('role'));
+  set('#evidence-team-size', '');
+  set('#evidence-business-flow', value('description'));
+  set('#evidence-technical-stack', value('techStack'));
+  set('#evidence-implementation', [value('techStack'), value('description')].filter(Boolean).join('；'));
+  set('#evidence-challenge', value('challenge'));
+  set('#evidence-result', value('highlight'));
+  set('#evidence-notes', '');
+}
+function collectProjectEvidence() {
+  const read = selector => ($(selector)?.value || '').trim();
+  return {
+    projectName: read('#evidence-project-name'),
+    role: read('#evidence-role'),
+    teamSize: read('#evidence-team-size'),
+    businessFlow: read('#evidence-business-flow'),
+    techStack: read('#evidence-technical-stack'),
+    implementation: read('#evidence-implementation'),
+    challenge: read('#evidence-challenge'),
+    resultEvidence: read('#evidence-result'),
+    confidentiality: read('#evidence-confidentiality') || '企业保密项目',
+    notes: read('#evidence-notes')
+  };
+}
+function projectEvidenceSummary(session) {
+  const evidence = session.projectEvidence || {};
+  const fields = [
+    ['项目', evidence.projectName], ['角色', evidence.role], ['团队', evidence.teamSize],
+    ['信息范围', evidence.confidentiality]
+  ].filter(item => item[1]);
+  if (!fields.length) return '';
+  return `<div class="chat-project-evidence"><div><span class="eyebrow">DE-IDENTIFIED PROJECT EVIDENCE</span><b>本场项目证据卡</b><small>无需源码 / ZIP</small></div><div class="chat-project-evidence-grid">${fields.map(item => `<span><b>${escapeHtml(item[0])}</b>${escapeHtml(item[1])}</span>`).join('')}</div></div>`;
+}
+function projectInterviewDebrief(session) {
+  const answers = (session.messages || []).filter(message => message.role === 'user');
+  if (!answers.length) return '';
+  const stages = ['职责边界','业务链路','技术实现','故障与边界','方案取舍','结果验证','证据补强','迁移验证'];
+  const rows = answers.map((message, index) => ({
+    stage: stages[index] || `追问 ${index + 1}`,
+    score: Number(message.score || 0),
+    feedback: message.feedback || '本轮已记录，但没有形成结构化反馈。'
+  }));
+  const strongest = [...rows].sort((a,b) => b.score - a.score)[0];
+  const weakest = [...rows].sort((a,b) => a.score - b.score)[0];
+  const advice = {
+    '职责边界': '把“参与开发”改成“我负责哪个模块、哪些工作由我独立完成”。',
+    '业务链路': '按“请求→服务→数据变化→返回”重写项目描述，避免只列功能名。',
+    '技术实现': '补充关键接口、数据结构和本人实现，不要只罗列技术栈。',
+    '故障与边界': '补充一次真实异常、定位过程和修复验证。',
+    '方案取舍': '说明替代方案、选择理由和放弃的成本。',
+    '结果验证': '说明基线、测试方法和数据来源；无法确认的数字不要写。',
+    '证据补强': '主动补充个人贡献和边界条件，避免答案停留在概述。',
+    '迁移验证': '准备“规模扩大10倍/增加新需求”的设计思路。'
+  };
+  return `<div class="project-debrief-card"><div class="project-debrief-head"><div><span class="eyebrow">PROJECT INTERVIEW DEBRIEF</span><h4>项目追问复盘</h4><p>以下结论直接来自本场回答，不要求项目源码。</p></div><b>${rows.length} 轮证据</b></div><div class="project-debrief-rows">${rows.map(row => `<div class="project-debrief-row ${row.score >= 75 ? 'strong' : row.score < 60 ? 'weak' : ''}"><span>${escapeHtml(row.stage)}</span><strong>${row.score} 分</strong><p>${escapeHtml(row.feedback)}</p></div>`).join('')}</div><div class="project-debrief-summary"><div><b>最强证据</b><p>${escapeHtml(strongest.stage)} · ${strongest.score} 分</p></div><div><b>优先补强</b><p>${escapeHtml(weakest.stage)} · ${escapeHtml(advice[weakest.stage] || '继续补充可验证证据。')}</p></div></div></div>`;
+}
+
 /* ---------- 简历 PDF / 图片导入 ---------- */
 function setResumeImportStatus(title, detail, progress=null) {
   const box = $('#resume-import-status');
@@ -1877,10 +1999,34 @@ async function startInterview(jobId) {
   try {
     state.activeResumeId = resumeId; state.activeJobId = selectedJob;
     $('#interview-resume').value = resumeId; $('#interview-job').value = selectedJob;
-    state.interview = await post('/api/interviews', { resumeId, jobId:selectedJob, difficulty:state.difficulty });
+    const projectEvidence = collectProjectEvidence();
+    state.interview = await post('/api/interviews', { resumeId, jobId:selectedJob, difficulty:state.difficulty, projectEvidence });
     renderInterview(state.interview);
-    toast('模拟面试已开始','五轮回答会形成技能证据；完成后面试页内解锁简历诊断');
+    toast('项目面试已开始','八轮追问将覆盖职责、链路、实现、故障、取舍和结果');
   } catch (error) { toast('创建失败',error.message,true); }
+}
+async function restoreLatestInterview() {
+  if (state.interview) return;
+  const resumeId = Number($('#interview-resume')?.value || state.activeResumeId);
+  if (!resumeId) return;
+  try {
+    const rows = await api('/api/interviews');
+    const latest = (rows || []).find(item => Number(item.resumeId) === resumeId && ['IN_PROGRESS', 'COMPLETED'].includes(item.status));
+    if (!latest) return;
+    state.interview = latest;
+    state.activeResumeId = Number(latest.resumeId);
+    state.activeJobId = Number(latest.jobId);
+    if ($('#interview-resume') && [...$('#interview-resume').options].some(option => option.value === String(latest.resumeId))) {
+      $('#interview-resume').value = String(latest.resumeId);
+    }
+    if ($('#interview-job') && [...$('#interview-job').options].some(option => option.value === String(latest.jobId))) {
+      $('#interview-job').value = String(latest.jobId);
+    }
+    renderInterview(latest);
+    toast('已恢复最近面试', latest.status === 'COMPLETED' ? '完整八轮记录和项目复盘已加载' : `从第 ${latest.currentRound} 轮继续`);
+  } catch (error) {
+    // Session restore is best-effort; starting a new interview remains available.
+  }
 }
 function renderInterview(session) {
   if (!session) return;
@@ -1891,18 +2037,20 @@ function renderInterview(session) {
   $('#interview-resume-label').textContent = interviewResumeLabel(session.resumeId);
   $('#interview-job-label').textContent = interviewJobLabel(session.jobId);
   renderInterviewJobFocus(session.jobId);
+  if (session.jobBlueprint) { state.jobBlueprint = session.jobBlueprint; renderInterviewBlueprint(session.jobBlueprint); }
   const progress = Math.round((session.status === 'COMPLETED' ? session.totalRounds : session.currentRound - 1) / session.totalRounds * 100);
   $('#round-text').textContent = `${session.status === 'COMPLETED' ? session.totalRounds : session.currentRound} / ${session.totalRounds}`;
   $('#round-bar').style.width = `${progress}%`;
   const messages = $('#chat-messages');
-  messages.innerHTML = (session.messages || []).map(message => {
+  messages.innerHTML = projectEvidenceSummary(session) + (session.messages || []).map(message => {
     const isUser = message.role === 'user'; const time = message.timestamp ? new Date(message.timestamp).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}) : '';
     const score = message.score ? `<span class="message-score">${message.score} 分</span>` : '';
     return `<div class="message ${isUser?'user':''}"><div class="message-avatar">${isUser?'我':'AI'}</div><div class="message-body"><p>${escapeHtml(message.content)}</p><div class="message-meta">${time} ${score}</div></div></div>`;
   }).join('');
   messages.scrollTop = messages.scrollHeight;
   if (session.status === 'COMPLETED') {
-    messages.insertAdjacentHTML('beforeend', `<div class="interview-complete-card"><div><span class="eyebrow">INTERVIEW COMPLETED</span><h4>本场面试已完成</h4><p>只有完成本场面试后，页面才会开放简历诊断。未面试或重新开始后不会保留旧诊断分。</p></div><button type="button" class="primary-button" id="generate-interview-diagnosis">生成简历诊断</button></div>`);
+    messages.insertAdjacentHTML('beforeend', `<div class="interview-complete-card"><div><span class="eyebrow">INTERVIEW COMPLETED</span><h4>本场项目面试已完成</h4><p>八轮回答已形成职责、链路、实现、故障、取舍和结果证据；现在可以生成简历诊断。</p></div><button type="button" class="primary-button" id="generate-interview-diagnosis">生成简历诊断</button></div>`);
+    messages.insertAdjacentHTML('beforeend', projectInterviewDebrief(session));
     $('#generate-interview-diagnosis')?.addEventListener('click', runInterviewDiagnosis);
     $('#interview-diagnosis-panel').hidden = false;
   }
@@ -1923,7 +2071,7 @@ async function sendInterviewAnswer() {
 async function runInterviewDiagnosis() {
   const session = state.interview;
   if (!session || session.status !== 'COMPLETED') {
-    toast('还不能诊断', '必须先完成当前岗位的五轮模拟面试', true);
+    toast('还不能诊断', '必须先完成当前岗位的八轮项目模拟面试', true);
     return;
   }
   const panel = $('#interview-diagnosis-panel');
@@ -1966,7 +2114,7 @@ async function runDiagnosisPage() {
   const evidence = await loadInterviewEvidence(resumeId, jobId);
   if (!evidence.length) {
     renderDiagnosisLocked('当前简历和岗位没有已完成面试，不能生成诊断。');
-    toast('诊断仍未解锁', '请先完成该岗位的五轮模拟面试', true);
+    toast('诊断仍未解锁', '请先完成该岗位的八轮项目模拟面试', true);
     return;
   }
   const target = $('#diagnosis-content');
@@ -2255,7 +2403,12 @@ $('#interview-difficulty').addEventListener('click', event => {
 $('#interview-resume').addEventListener('change', event => {
   state.activeResumeId = Number(event.target.value);
   $('#interview-resume-label').textContent = interviewResumeLabel(state.activeResumeId);
+  populateProjectEvidenceProjects(true);
   resetInterviewWorkspace('简历已切换');
+});
+$('#interview-project-select').addEventListener('change', event => {
+  const resume = evidenceResume();
+  fillProjectEvidence((resume?.projects || [])[Number(event.target.value || 0)] || null);
 });
 $('#interview-job').addEventListener('change', event => {
   state.activeJobId = Number(event.target.value) || null;

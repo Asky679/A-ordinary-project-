@@ -173,9 +173,28 @@ public final class ApiModels {
                                          boolean verified, String source, List<String> evidence,
                                          LocalDateTime updatedAt) {}
 
+    /** 从岗位 JD 提取的面试蓝图，用于约束面试覆盖范围。 */
+    public record JobInterviewBlueprint(Long jobId, String title, String company, String roleDirection,
+                                        String seniority, String domain,
+                                        List<String> mustHaveSkills, List<String> niceToHaveSkills,
+                                        List<String> coreResponsibilities, List<String> interviewScenarios,
+                                        List<String> hardConstraints, String companyStyle,
+                                        List<String> coveragePlan, String sourceSummary) {}
+
+    /** 脱敏项目证据卡：企业项目不需要上传源码。 */
+    public record InterviewProjectEvidence(String projectName, String role, String teamSize,
+                                           String businessFlow, String techStack, String implementation,
+                                           String challenge, String resultEvidence, String confidentiality,
+                                           String notes) {}
+
     public record InterviewStartRequest(@NotNull(message = "请选择简历") Long resumeId,
                                         @NotNull(message = "请选择目标岗位") Long jobId,
-                                        String difficulty) {}
+                                        String difficulty,
+                                        @Valid InterviewProjectEvidence projectEvidence) {
+        public InterviewStartRequest(Long resumeId, Long jobId, String difficulty) {
+            this(resumeId, jobId, difficulty, null);
+        }
+    }
 
     public record InterviewAnswerRequest(@NotBlank(message = "回答不能为空") String answer) {}
 
@@ -186,6 +205,8 @@ public final class ApiModels {
                                 String difficulty, String status, int currentRound, int totalRounds,
                                 int overallScore, List<InterviewMessage> messages,
                                 List<InterviewSkillEvidence> skillEvidence,
+                                InterviewProjectEvidence projectEvidence,
+                                JobInterviewBlueprint jobBlueprint,
                                 LocalDateTime startedAt, LocalDateTime updatedAt) {}
 
     public record DiagnosisRequest(Long resumeId, Long jobId) {}

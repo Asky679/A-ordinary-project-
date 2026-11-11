@@ -95,3 +95,7 @@ ALTER TABLE education_verifications
 -- 面试技能证据：由已完成的面试记录生成，供简历诊断和岗位匹配复用。
 ALTER TABLE interview_sessions
     ADD COLUMN IF NOT EXISTS skill_evidence_json TEXT;
+ALTER TABLE interview_sessions
+    ADD COLUMN IF NOT EXISTS project_evidence_json TEXT;
+ALTER TABLE interview_sessions
+    ADD COLUMN IF NOT EXISTS job_blueprint_json TEXT;

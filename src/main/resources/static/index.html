@@ -348,7 +348,7 @@
 
         <section class="view" id="view-interview">
           <div class="page-heading">
-            <div><span class="eyebrow">AI INTERVIEW &amp; DIAGNOSIS</span><h1>模拟面试</h1><p>先选择岗位并完成五轮面试，面试结束后才开放简历诊断。后续数字人可在这个独立页面继续扩展。</p></div>
+            <div><span class="eyebrow">AI INTERVIEW &amp; DIAGNOSIS</span><h1>模拟面试</h1><p>先选择岗位并填写脱敏项目证据卡，完成八轮项目追问后才开放简历诊断。</p></div>
             <span class="session-status" id="interview-status">尚未开始</span>
           </div>
           <div class="interview-layout">
@@ -356,17 +356,41 @@
               <span class="eyebrow">SESSION SETUP</span><h3>配置本场面试</h3>
               <label><span>选择简历 *</span><select id="interview-resume"></select></label>
               <label><span>目标岗位 *</span><select id="interview-job"></select></label>
+              <details class="project-evidence-card" id="project-evidence-card" open>
+                <summary><div><span class="eyebrow">PROJECT EVIDENCE</span><strong>脱敏项目证据卡</strong></div><small>无需源码 / ZIP</small></summary>
+                <div class="project-evidence-fields">
+                  <label><span>从简历选择项目</span><select id="interview-project-select"></select></label>
+                  <label><span>项目名称</span><input id="evidence-project-name" placeholder="例如：企业订单系统"></label>
+                  <label><span>技术栈</span><input id="evidence-technical-stack" placeholder="例如：Java、Spring Boot、MySQL、Redis、MQ"></label>
+                  <div class="project-evidence-grid">
+                    <label><span>我的角色</span><input id="evidence-role" placeholder="例如：后端开发"></label>
+                    <label><span>团队规模</span><input id="evidence-team-size" placeholder="例如：5 人"></label>
+                    <label><span>信息范围</span><select id="evidence-confidentiality"><option>企业保密项目</option><option>个人公开项目</option><option>课程/校园项目</option></select></label>
+                  </div>
+                  <label><span>核心业务链路</span><textarea id="evidence-business-flow" rows="2" placeholder="用户请求 → 服务处理 → 数据变化 → 返回结果"></textarea></label>
+                  <label><span>关键实现与技术选择</span><textarea id="evidence-implementation" rows="2" placeholder="负责模块、技术栈、关键实现"></textarea></label>
+                  <label><span>故障 / 难点与处理</span><textarea id="evidence-challenge" rows="2" placeholder="发生了什么、如何定位、如何修复"></textarea></label>
+                  <label><span>成果与验证方式</span><textarea id="evidence-result" rows="2" placeholder="基线、测试方法、结果和你个人能负责的范围"></textarea></label>
+                  <label><span>补充说明（可选）</span><textarea id="evidence-notes" rows="2" placeholder="只填写脱敏信息，不要提供公司内部数据、客户信息或源码"></textarea></label>
+                </div>
+                <p class="project-evidence-privacy">企业项目只使用脱敏模块和业务描述。系统不需要源码、ZIP、公司内部接口或真实客户数据。</p>
+              </details>
               <label><span>面试强度</span><div class="segmented" id="interview-difficulty"><button class="active" data-value="标准">标准</button><button data-value="压力">压力</button></div></label>
               <button class="primary-button full" id="start-interview">启动模拟面试 <span>→</span></button>
               <div class="interview-context-card"><span>当前简历</span><strong id="interview-resume-label">—</strong></div>
               <div class="interview-context-card"><span>当前岗位</span><strong id="interview-job-label">—</strong></div>
               <div class="interview-focus-card"><span>岗位考察方向</span><div id="interview-focus-tags" class="interview-focus-tags"><small>选择岗位后自动生成</small></div><p>问题优先围绕岗位技能和任职要求，简历用于选择项目载体。</p></div>
-              <div class="interview-stage-list"><span><i>1</i>基础概念</span><span><i>2</i>项目实现</span><span><i>3</i>故障与边界</span><span><i>4</i>方案取舍</span><span><i>5</i>结果验证</span></div>
-              <div class="setup-note"><i>✦</i><p>不选择岗位不能开始面试。每次重新开始都会清空上一轮会话和诊断，未完成本场面试不会生成诊断分。</p></div>
+              <div class="interview-blueprint-panel" id="interview-blueprint-panel">
+                <div class="interview-blueprint-head"><span class="eyebrow">JD INTERVIEW BLUEPRINT</span><b>JD 面试蓝图</b></div>
+                <p>选择岗位后，从岗位库中的技能、职责、经验和行业数据生成。</p>
+              </div>
+              <div class="interview-stage-list compact"><span><i>1</i>职责边界</span><span><i>2</i>业务链路</span><span><i>3</i>技术实现</span><span><i>4</i>故障与边界</span><span><i>5</i>方案取舍</span><span><i>6</i>结果验证</span></div>
+              <p class="interview-stage-note">六个主题之后，系统会根据回答薄弱点追加“证据补强”和“迁移验证”两轮。</p>
+              <div class="setup-note"><i>✦</i><p>不选择岗位不能开始面试。企业项目无需上传源码，只需填写脱敏项目证据卡。未完成本场面试不会生成诊断分。</p></div>
             </aside>
             <article class="panel chat-panel">
-              <div class="chat-head"><div class="interviewer-avatar"><span>AI</span><i></i></div><div><strong>职航面试官</strong><small id="chat-job-title">等待选择目标岗位</small></div><div class="round-progress"><span id="round-text">0 / 5</span><div><i id="round-bar"></i></div></div></div>
-              <div id="chat-messages" class="chat-messages"><div class="chat-empty"><div class="empty-orbit">AI</div><h3>选择岗位后开始面试</h3><p>五轮回答会形成面试证据，完成后解锁简历诊断。</p></div></div>
+              <div class="chat-head"><div class="interviewer-avatar"><span>AI</span><i></i></div><div><strong>职航面试官</strong><small id="chat-job-title">等待选择目标岗位</small></div><div class="round-progress"><span id="round-text">0 / 8</span><div><i id="round-bar"></i></div></div></div>
+              <div id="chat-messages" class="chat-messages"><div class="chat-empty"><div class="empty-orbit">AI</div><h3>选择岗位后开始面试</h3><p>八轮项目追问会形成职责、链路、实现和结果证据，完成后解锁简历诊断。</p></div></div>
               <div class="answer-box"><textarea id="interview-answer" rows="3" placeholder="结合真实项目回答；说明原理、你的动作、边界与验证结果..."></textarea><div><span>Enter 发送 · Shift + Enter 换行</span><button class="primary-button" id="send-answer">发送回答 ↑</button></div></div>
             </article>
           </div>
