@@ -1,0 +1,388 @@
+body[data-route="jobs"][data-layer="cover"] {
+  --sky-ink:#14131a;
+  --sky-paper:#f4e9d9;
+  --sky-muted:#cdbfb4;
+  --sky-line:#d7b79858;
+  background:var(--sky-ink);
+}
+.reference-sky {
+  position:relative;
+  isolation:isolate;
+  min-height:100svh;
+  overflow:hidden;
+  color:#eef3ff;
+  background:#030510;
+}
+.reference-sky-scene,.reference-sky-background,.reference-sky-dust,.job-star-field,.reference-sky-rails {
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+}
+.reference-sky-scene { z-index:-1; isolation:isolate; pointer-events:none; overflow:hidden }
+.reference-sky-scene::after {
+  content:"";
+  position:absolute;
+  inset:0;
+}
+.reference-sky-scene::after {
+  z-index:3;
+  background:linear-gradient(0deg,#040513f5,transparent 36%),
+    linear-gradient(180deg,#050614ab,transparent 23%),
+    linear-gradient(90deg,transparent 27%,#07091c2b 49%,#07091c9e 100%);
+}
+.reference-sky-background {
+  object-fit:cover;
+  object-position:center;
+}
+.reference-sky-dust { z-index:2 }
+.reference-sky-rails { pointer-events:none; display:flex; justify-content:space-between; align-items:center; padding:0 3.4vw }
+.reference-sky-rails svg { width:clamp(33px,5vw,72px); height:clamp(150px,48vh,435px); fill:none; stroke:#f2f2ffbc; stroke-width:2 }
+.reference-sky-rails svg:last-child { scale:-1 1 }
+.job-star-field { cursor:grab; touch-action:none }
+.job-star-field:focus-visible { outline:2px solid #c8dbff; outline-offset:-5px }
+.job-stars { position:absolute; inset:0 }
+[data-sky-dragging] :is(.job-star-field,.job-star) { cursor:grabbing; user-select:none }
+.sky-controls { display:flex; gap:1px; background:#26314b; border:1px solid #51617d }
+.sky-controls button { color:#e2edff; background:#0a1223; border:0; min-width:35px; min-height:36px; cursor:pointer }
+.sky-controls button:is(:hover,:focus-visible) { background:#283d5b }
+[data-sky-aligned] .reference-sky-rails svg { animation:sky-alignment .46s cubic-bezier(.2,.75,.25,1) both }
+@keyframes sky-alignment { from { translate:-12px 0; opacity:.22 } to { translate:0; opacity:1 } }
+.job-star {
+  --star-size:calc(clamp(44px,4.35vw,68px) * var(--star-scale));
+  width:max(52px,calc(var(--star-size) + 14px));
+  aspect-ratio:1;
+  display:grid;
+  place-items:center;
+  position:absolute;
+  left:var(--star-x);
+  top:var(--star-y);
+  transform:translate(calc(-50% + var(--orbit-x,0px) * var(--star-depth,0)),calc(-50% + var(--orbit-y,0px) * var(--star-depth,0)));
+  border:0;
+  border-radius:50%;
+  padding:0;
+  background:transparent;
+  cursor:pointer;
+  pointer-events:auto;
+  color:#fff;
+}
+.job-star:focus-visible { outline:2px solid #dbe4ff; outline-offset:3px }
+.job-star .job-star-texture {
+  width:var(--star-size);
+  aspect-ratio:auto;
+  display:block;
+  border:0;
+  border-radius:0;
+  background:none;
+  box-shadow:none;
+  filter:brightness(.95) saturate(.91);
+}
+.job-star::after {
+  content:"";
+  position:absolute;
+  inset:0;
+  border:1px solid #c5d7f064;
+  border-radius:inherit;
+  opacity:0;
+  pointer-events:none;
+  transition:opacity .2s ease;
+}
+.job-star:is(:hover,:focus-visible,[aria-pressed="true"])::after { opacity:1 }
+[data-sky-dragging] .job-star::after { opacity:0 }
+:is(.job-star-texture,.job-posting-orb)[src$="/mercury.webp"] {
+  --planet-grade:grayscale(.68) sepia(.28) hue-rotate(192deg) saturate(1.35);
+}
+:is(.job-star-texture,.job-posting-orb)[src$="/neptune.webp"] { --planet-grade:saturate(.79) }
+:is(.job-star-texture,.job-posting-orb)[src$="/jupiter.webp"] { --planet-grade:saturate(.68) }
+.sky-contact { position:absolute; bottom:calc(100% + 8px); left:0; padding:5px 9px; background:#090d20e8; border-left:2px solid #a1b9d6; color:#e2ebff; font-size:.78rem; pointer-events:none }
+.sky-contact:empty,[data-sky-dragging] .sky-contact { display:none }
+.job-sightline {
+  position:absolute;
+  z-index:3;
+  width:78px;
+  overflow:visible;
+  pointer-events:none;
+  fill:none;
+  stroke:#f5f7ff;
+  stroke-width:1;
+  filter:drop-shadow(0 1px 1px #0a163c);
+}
+.job-sightline[hidden] { display:none }
+.job-sightline g { transform-origin:143.8px 132.1px }
+.job-sightline g circle:last-child { fill:#f5f7ff; stroke:none }
+.job-sightline path { stroke-dasharray:1 }
+.job-star-preview {
+  position:absolute;
+  z-index:4;
+  width:min(278px,calc(100% - 32px));
+  padding:10px 13px 12px;
+  border:1px solid #d6dffc92;
+  border-top:3px solid #e8edff;
+  background:linear-gradient(135deg,#262d4ae8,#0a0f23ed 70%);
+  color:#f3f5ff;
+  box-shadow:0 10px 34px #02040d86;
+}
+.job-star-preview h2 {
+  margin:0 23px 8px 0;
+  padding:5px 6px;
+  background:linear-gradient(90deg,#6579bf7a,transparent);
+  font-size:clamp(.9rem,1.34vw,1.15rem);
+  line-height:1.32;
+}
+.job-star-preview p { color:#d7e0f8; font-size:.78rem; margin:0; line-height:1.52 }
+.job-star-close {
+  position:absolute;
+  right:2px;
+  top:2px;
+  width:33px;
+  height:33px;
+  border:0;
+  background:transparent;
+  color:#edf2ff;
+  font-size:1.12rem;
+}
+.job-star-close:hover { background:#bdc8f32d }
+.job-star-skills { display:flex; flex-wrap:wrap; gap:4px; margin:9px 0 6px }
+.job-star-skills .chip {
+  border:1px solid #8296d17a;
+  background:#172240;
+  color:#f2f4ff;
+  font-size:.68rem;
+  padding:2px 6px;
+}
+.job-star-skills:empty { display:none }
+.job-star-enter,.reference-sky-jobs {
+  display:inline-flex;
+  align-items:center;
+  min-height:42px;
+  color:#edf3ff;
+  font-size:.84rem;
+  text-decoration:none;
+  border-bottom:1px solid #adbdf38a;
+}
+.job-star-enter:hover,.reference-sky-jobs:hover { color:#a9c6ff }
+.reference-sky-dock {
+  position:absolute;
+  left:var(--edge);
+  right:var(--edge);
+  bottom:clamp(18px,3.7vh,52px);
+  display:flex;
+  flex-wrap:wrap;
+  justify-content:space-between;
+  align-items:end;
+  gap:13px;
+  border-top:1px solid #9aaee171;
+  padding:11px 0 0;
+}
+.reference-sky-dock h1 {
+  font:400 clamp(27px,3vw,48px)/1.1 var(--editorial-serif);
+  margin:0;
+}
+.reference-sky-dock p { margin:5px 0 0; color:#c3d2ed; font-size:.78rem }
+.reference-sky-credit {
+  display:inline-block;
+  margin-top:5px;
+  color:#c0c8e2;
+  font-size:.68rem;
+  text-decoration-color:#c0c8e27a;
+  text-underline-offset:3px;
+}
+.reference-sky-dock nav { display:flex; align-items:center; gap:14px; flex-wrap:wrap }
+.reference-sky-dock .atlas-link { border-color:#aab9f368; color:#edf3ff; background:#10192cbd }
+.reference-sky-dock .atlas-link small { border-color:#aab9f368; color:#c6d6f9 }
+.reference-sky-dock .atlas-link:hover { background:#223251 }
+
+.planet-surface {
+  position:relative;
+  display:block;
+  width:100%;
+  aspect-ratio:1;
+  overflow:hidden;
+  border-radius:50%;
+  border:1px solid color-mix(in srgb,var(--planet-color,var(--sector-light)) 65%,transparent);
+  background:radial-gradient(ellipse at 33% 23%,transparent 22%,#050c1c42 56%,#040918e0 91%),var(--planet-image) center / cover;
+  box-shadow:inset 0 0 15px #deedff29,0 0 32px color-mix(in srgb,var(--planet-color,var(--sector-light)) 35%,transparent);
+}
+.planet-surface.lit-planet {
+  --light-angle:320deg;
+  --light-x:88%;
+  --light-y:105%;
+  --planet-light:#e3b98e;
+  border:0;
+  background:#19151b;
+  box-shadow:0 4px 14px #100b1466;
+}
+.lit-planet::before,.lit-planet::after {
+  content:"";
+  position:absolute;
+  inset:0;
+  border-radius:inherit;
+}
+.lit-planet::before {
+  background:var(--planet-image) center / cover;
+  filter:saturate(.49) contrast(.88) brightness(.88);
+}
+.lit-planet::after {
+  background:
+    radial-gradient(ellipse at var(--light-x) var(--light-y),
+      color-mix(in srgb,var(--planet-light) 70%,transparent),transparent 41%),
+    linear-gradient(var(--light-angle),
+      color-mix(in srgb,var(--planet-light) 42%,transparent) 0%,
+      color-mix(in srgb,var(--planet-light) 17%,transparent) 28%,
+      #2a202b54 43%,#201921c9 69%,#18141bee 100%);
+  box-shadow:inset 0 0 0 1px #ecd3b52c;
+}
+.planet-role {
+  display:flex;
+  align-items:center;
+  min-height:44px;
+  border-bottom:1px solid #e2c6aa32;
+  color:#f2e7dd;
+  font-size:.87rem;
+  text-decoration:none;
+}
+.planet-role:is(:hover,:focus-visible) { color:var(--planet-color) }
+
+.job-posting-header {
+  min-height:194px;
+  position:relative;
+  overflow:hidden;
+  color:#f3f5ff;
+  background:radial-gradient(ellipse at 76% 46%,#302951,#0b1028 64%);
+  border-bottom:1px solid #7992d060;
+}
+.job-posting-heading {
+  position:relative;
+  z-index:1;
+  max-width:1440px;
+  margin:auto;
+  padding:20px var(--edge) 23px;
+}
+.job-posting-heading nav { display:flex; flex-wrap:wrap; gap:16px }
+.job-posting-heading h1 {
+  max-width:72%;
+  margin-top:14px;
+  font:400 clamp(34px,4.5vw,68px)/1.16 var(--editorial-serif);
+}
+.job-posting .job-posting-orb {
+  position:absolute;
+  top:50%;
+  right:12%;
+  width:clamp(90px,14vw,176px);
+  filter:var(--planet-grade,brightness(1));
+  aspect-ratio:auto;
+  transform:translateY(-50%);
+  border:0;
+  border-radius:0;
+  background:none;
+  box-shadow:none;
+}
+.job-posting-content {
+  display:grid;
+  grid-template-columns:minmax(0,2fr) minmax(220px,.95fr);
+  gap:20px;
+  align-items:start;
+}
+.job-posting-content .panel h3 { margin-top:16px }
+.job-posting-similar .row { text-decoration:none }
+@media (max-width:750px) { .job-posting-content { grid-template-columns:1fr } }
+
+.sector-work {
+  --page:#eeece5;
+  --surface:#fdfaf2;
+  --ink:#2d2e36;
+  --muted:#585860;
+  --line:#d8d3c7;
+  --accent:#4d4b70;
+  color:var(--ink);
+  background:var(--page);
+  min-height:calc(100svh - var(--chrome-height));
+}
+.sector-header {
+  --line:#7786a17a;
+  isolation:isolate;
+  position:relative;
+  overflow:hidden;
+  background:radial-gradient(ellipse at 76% 40%,color-mix(in srgb,var(--sector-light) 22%,#070c26),#090f23 55%,#070b1a);
+  border-bottom:1px solid var(--line);
+  color:#eef1ff;
+}
+.sector-brief {
+  position:relative;
+  width:min(100%,1500px);
+  margin:auto;
+  padding:clamp(22px,3vw,43px) var(--edge);
+}
+.sector-nav,.sector-roles { display:flex; flex-wrap:wrap; align-items:center; gap:10px 18px }
+.sector-back { color:#d3def4; font-size:.83rem; text-decoration:none }
+.sector-back:hover { text-decoration:underline }
+.sector-brief h1 {
+  margin:.28em 0 .3em;
+  font-size:clamp(2.3rem,6vw,5.2rem);
+  line-height:1.14;
+  letter-spacing:.04em;
+  text-shadow:0 2px 22px #030621;
+}
+.sector-orbit {
+  position:absolute;
+  z-index:-1;
+  top:50%;
+  right:clamp(0px,10vw,210px);
+  width:clamp(230px,37vw,590px);
+  aspect-ratio:1;
+  transform:translateY(-50%);
+  display:grid;
+  place-items:center;
+  border:1px solid color-mix(in srgb,var(--sector-light) 34%,transparent);
+  border-radius:50%;
+  box-shadow:0 0 0 24px #c8dbff0b, 0 0 0 65px #c8dbff08, inset 0 0 74px #9fbaff12;
+}
+.sector-orbit .planet-surface {
+  width:64%;
+  animation:sector-drift 8s ease-in-out infinite;
+}
+@keyframes sector-drift { 50% { transform:translateY(-9px) } }
+.no-motion .sector-orbit .planet-surface { animation:none }
+[data-share-planet] :is(.job-star[aria-pressed="true"],.job-posting,.sector-orbit,.skill-sheet) .planet-surface { view-transition-name:planet-bridge }
+::view-transition-group(planet-bridge) { animation-duration:.5s; animation-timing-function:var(--cinema-ease) }
+.sector-roles { gap:8px }
+.sector-roles a {
+  display:inline-flex;
+  align-items:center;
+  min-height:42px;
+  padding:6px 12px;
+  text-decoration:none;
+  background:#090f25dd;
+  border:1px solid var(--line);
+  border-radius:3px;
+}
+.sector-roles a[aria-current] { border-color:var(--sector-light); color:var(--sector-light) }
+.sector-role-detail {
+  margin-top:clamp(18px,3vw,35px);
+  max-width:550px;
+  padding:16px 18px;
+  background:#0a1023dc;
+  border:1px solid var(--line);
+  border-left-color:var(--sector-light);
+}
+.sector-role-detail p { margin-top:5px }
+.sector-role-detail .chip { color:#e9edff; background:#222b44; border-color:#657491 }
+.sector-work input::placeholder { color:var(--muted) }
+.sector-work .job strong { color:#49466d }
+.job-search-actions { display:flex; flex-wrap:wrap; align-items:center; gap:6px }
+body[data-route="jobs"][data-layer="work"] .bar:has(+ #content .sector-work) { background:#0c1123 }
+@media (max-width:640px) {
+  .sector-orbit { right:-95px; top:41%; opacity:.6 }
+  .sector-roles a { font-size:.87rem }
+}
+
+.reference-sky-background { transform:translate(var(--sky-x,0px),var(--sky-y,0px)) scale(var(--sky-depth,1.5)) }
+.sky-companion { position:absolute; z-index:2; transform:translate(calc(-50% + var(--moon-x,0px)),calc(-50% + var(--moon-y,0px))) }
+.sky-companion-ring { left:66%; top:15%; width:clamp(40px,4.6vw,70px) }
+.sky-companion-rock { left:58%; top:60%; width:clamp(23px,2vw,32px) }
+.reference-sky-credit { position:absolute; top:100%; right:0 }
+body[data-route="jobs"][data-layer="cover"] .bar .wordmark small { display:none }
+body[data-route="jobs"][data-layer="cover"] .bar :is(.map-home,.quick-nav summary,#motion) { min-height:54px }
+
+.sky-companion-distant { left:29%; top:26%; width:clamp(16px,1.7vw,28px); filter:brightness(.68) saturate(.76) }
+.sky-companion-outer { left:89%; top:54%; width:clamp(23px,2.4vw,38px); filter:brightness(.62) saturate(.78) }

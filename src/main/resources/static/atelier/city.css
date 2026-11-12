@@ -1,0 +1,328 @@
+.city {
+  --city-floor:#122526;
+  min-height:100svh;
+  position:relative;
+  isolation:isolate;
+  display:grid;
+  align-content:space-between;
+  gap:30px;
+  padding:clamp(91px,13.3svh,149px) var(--edge) clamp(18px,3.4svh,47px);
+  overflow:hidden;
+  background:var(--city-floor);
+  color:#f7f1dd;
+}
+.city-world {
+  position:absolute;
+  inset:0 auto auto 50%;
+  width:max(100%,calc(100svh * 1.777));
+  max-width:119%;
+  min-height:100svh;
+  aspect-ratio:1.777;
+  transform:translateX(-50%);
+}
+.city-world::after {
+  content:"";
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  background:linear-gradient(0deg,#152827d9 0%,#12252622 19%,transparent 35%),
+    linear-gradient(90deg,#1828222e,transparent 48%);
+}
+.city-art,.city-mist,.city-paths,.city-landmarks {
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+}
+.city-art,.city-paths,.city-mist { pointer-events:none }
+.city-art {
+  object-fit:fill;
+  filter:saturate(.91);
+  transform:translate(var(--look-x,0px),var(--look-y,0px)) scale(1.012);
+  transition:transform .75s var(--cinema-ease);
+}
+.no-motion .city-art { transform:none }
+.city-mist {
+  background:radial-gradient(ellipse at 44% 31%,#a1c4c54b,transparent 55%) 0 0 / 135% 100%,
+    radial-gradient(ellipse at 79% 43%,#f7bc6b42,transparent 57%) 0 0 / 142% 100%;
+  mix-blend-mode:screen;
+  opacity:.24;
+  animation:coast-light 16s ease-in-out infinite alternate;
+}
+@keyframes coast-light { to { background-position:100% 0,73% 0; opacity:.48 } }
+.city-paths,.city-landmarks { z-index:1 }
+.city-landmarks { pointer-events:none }
+.city-landmark {
+  position:absolute;
+  left:var(--x);
+  top:var(--y);
+  transform:translate(-50%,-50%);
+  width:var(--hit-width);
+  height:var(--hit-height);
+  display:grid;
+  place-items:center;
+  pointer-events:auto;
+  color:var(--light);
+  text-decoration:none;
+  -webkit-tap-highlight-color:transparent;
+}
+.city-landmark:focus-visible { outline:0 }
+.city-landmark:focus-visible .landmark-beacon { outline:2px solid #fff4d5; outline-offset:5px }
+.city-landmark::before {
+  content:"";
+  position:absolute;
+  inset:4%;
+  pointer-events:none;
+  background:radial-gradient(ellipse,#ffeac074 0%,#ffdca636 39%,transparent 70%);
+  mix-blend-mode:screen;
+  opacity:0;
+  transition:opacity .35s ease;
+}
+.city-landmark[data-highlight]::before { opacity:1 }
+.landmark-beacon {
+  position:relative;
+  width:38px;
+  height:38px;
+  display:grid;
+  place-items:center;
+  border:1px solid currentColor;
+  border-radius:50%;
+  background:#172a2ce8;
+  box-shadow:0 0 0 5px #172a2c5e,0 0 24px color-mix(in srgb,var(--light) 35%,transparent);
+  transition:transform .32s var(--cinema-ease),background .25s,color .25s;
+}
+.landmark-beacon::after {
+  content:"";
+  position:absolute;
+  inset:-7px;
+  border:1px dotted currentColor;
+  border-radius:50%;
+  opacity:.63;
+}
+.landmark-name {
+  position:absolute;
+  top:calc(50% + 27px);
+  left:50%;
+  transform:translateX(-50%);
+  padding:2px 8px;
+  white-space:nowrap;
+  background:#142729e8;
+  color:#fff5da;
+  border:1px solid #f0dab96b;
+  box-shadow:0 3px 13px #0b201b66;
+  font-size:.75rem;
+}
+.landmark-name > span { margin-left:4px; color:var(--light) }
+.city-landmark[data-highlight] { z-index:2 }
+.city-landmark[data-highlight] .landmark-name > span { color:inherit }
+.city-landmark[data-highlight] .landmark-beacon {
+  transform:scale(1.15);
+  background:var(--light);
+  color:#1d302b;
+}
+.city-landmark[data-highlight] .landmark-name { background:var(--light); color:#172a24 }
+.city-intro {
+  position:relative;
+  z-index:2;
+  width:min(26.2vw,378px);
+  min-width:286px;
+  align-self:start;
+  padding:clamp(21px,2.55vw,37px);
+  border:1px solid #efe4bd;
+  background:
+    radial-gradient(ellipse at 87% 12%,#ead8a452,transparent 64%),
+    repeating-linear-gradient(0deg,#886a3007 0 1px,transparent 1px 4px),
+    #f2ebd6;
+  box-shadow:0 17px 60px #091e1dd0,0 0 0 6px #e6e2b724;
+  color:#26312a;
+  animation:city-folio .72s var(--cinema-ease) both;
+}
+.city-intro::after {
+  content:"";
+  position:absolute;
+  pointer-events:none;
+  inset:7px;
+  border:1px solid #97815a59;
+}
+@keyframes city-folio { from { opacity:.2; clip-path:inset(0 0 100% 0) } }
+.city-intro .scene-label { color:#5c5235; letter-spacing:.12em }
+.city-intro h1 {
+  margin:15px 0 13px;
+  font:400 clamp(35px,3.48vw,57px)/1.09 var(--editorial-serif);
+  letter-spacing:-.08em;
+}
+.city-line { display:block; overflow:hidden; padding:0 .2em .12em 0; margin:0 -.2em -.12em 0 }
+.city-line > span { display:block; animation:atlas-title .83s .13s var(--cinema-ease) both }
+.city-line:nth-child(2) > span { color:#59634b; animation-delay:.22s }
+@keyframes atlas-title { from { transform:translateY(105%) } }
+.city-lede { color:#4e5547; font-size:clamp(.83rem,1vw,.99rem); line-height:1.7 }
+.city-start {
+  display:inline-flex;
+  align-items:center;
+  gap:13px;
+  min-height:44px;
+  margin-top:17px;
+  padding-inline:12px;
+  background:#394d3d;
+  color:#fff8e4;
+  font-size:.86rem;
+  text-decoration:none;
+}
+.city-start:hover { background:#273b31 }
+.city-start-copy { display:grid; min-width:0; gap:4px }
+.city-next-detail { color:#ded4c3; font-size:.76rem; line-height:1.4; overflow-wrap:anywhere }
+.city-next:has(.city-next-detail:not([hidden])) .city-start {
+  justify-content:space-between;
+  gap:20px;
+  min-width:min(218px,100%);
+  max-width:min(290px,100%);
+  padding:11px 14px;
+  background:#141e28f5;
+  border:1px solid #e3c99b80;
+  border-radius:6px;
+  color:#fff2d8;
+}
+.city-next:has(.city-next-detail:not([hidden])) .city-start:is(:hover,:focus-visible) {
+  background:#28333c;
+  border-color:#e3c99b;
+}
+.city-start-arrow { flex:none; color:#edce94; font-size:1rem }
+.city-dock {
+  position:relative;
+  z-index:2;
+  display:grid;
+  grid-template-columns:repeat(5,minmax(0,1fr));
+  border:1px solid #ecd9ad70;
+  background:#182d2ce8;
+  box-shadow:0 12px 50px #08191556;
+  backdrop-filter:blur(13px);
+  animation:frame-rise .68s .21s var(--cinema-ease) both;
+}
+.city-dock a {
+  display:grid;
+  grid-template-columns:auto 1fr auto;
+  align-items:center;
+  gap:11px;
+  min-height:68px;
+  padding:9px clamp(10px,1.25vw,19px);
+  text-decoration:none;
+  transition:background .26s;
+}
+.city-dock a+a { border-left:1px solid #f1dca735 }
+.city-dock a:is(:hover,:focus-visible),.city-dock a[data-highlight] {
+  background:#efe6b72b;
+  box-shadow:inset 0 2px var(--light);
+  outline-offset:-4px;
+}
+.dock-icon {
+  color:var(--light);
+  font-size:18px;
+  width:29px;
+  text-align:center;
+  border:1px solid color-mix(in srgb,var(--light) 44%,transparent);
+  border-radius:50%;
+}
+.city-dock strong,.city-dock small { display:block }
+.city-dock strong { font-size:.94rem; font-weight:650; letter-spacing:.02em }
+.city-dock small { color:#dce2d2; font-size:.72rem }
+.dock-arrow { color:var(--light); font-size:.83rem }
+@media (max-width:1150px) {
+  .city-dock a { grid-template-columns:auto 1fr }
+  .dock-arrow { display:none }
+}
+@media (max-width:940px) {
+  .city {
+    padding-top:calc(var(--chrome-height) + 17px);
+    gap:0;
+    align-content:start;
+    padding-bottom:24px;
+  }
+  .city-intro {
+    grid-row:1;
+    width:100%;
+    min-width:0;
+    padding:20px;
+    box-shadow:0 6px 27px #0b1a1a50;
+  }
+  .city-intro h1 { margin:8px 0 10px; font-size:clamp(37px,7.2vw,62px) }
+  .city-line,.city-line > span { display:inline-block }
+  .city-start { display:none }
+  .city-world {
+    grid-row:2;
+    position:relative;
+    inset:auto;
+    width:calc(100% + var(--edge) * 2);
+    max-width:none;
+    min-height:0;
+    margin:0 calc(-1 * var(--edge));
+    aspect-ratio:auto;
+    height:clamp(220px,56.3vw,485px);
+    transform:none;
+  }
+  .city-art { filter:saturate(.93) }
+  .city-world::after { background:linear-gradient(0deg,var(--city-floor),transparent 22%,transparent 88%,var(--city-floor)) }
+  .city-landmark { width:50px; height:50px }
+  .landmark-beacon { width:30px; height:30px; font-size:.87rem }
+  .landmark-name { font-size:.66rem; padding:1px 4px; top:calc(50% + 21px) }
+  .city-landmark[data-destination="project"] .landmark-name { transform:translateX(-65%) }
+  .city-dock { grid-template-columns:repeat(2,minmax(0,1fr)) }
+  .city-dock a { min-height:49px; padding:6px 9px; gap:7px }
+  .city-dock a+a { border-left:0 }
+  .city-dock a:nth-child(2n) { border-left:1px solid #e9e4d134 }
+  .city-dock a:nth-child(n+3) { border-top:1px solid #e9e4d134 }
+  .city-dock a:last-child { grid-column:span 2 }
+  .dock-icon { width:24px; font-size:14px }
+}
+@media (max-width:470px) {
+  .city-line,.city-line > span { display:block }
+  .city-intro h1 { line-height:1.07 }
+  .city-landmark { width:44px; height:44px }
+}
+
+@media (min-width: 941px) {
+  .city {
+    --city-floor:#0b1923;
+    padding-top:clamp(92px,11.5svh,120px);
+    padding-bottom:4svh;
+  }
+  .city-world {
+    max-width:none;
+    z-index:-1;
+  }
+  .city-world::after {
+    background:linear-gradient(0deg,#0b1923 0%,transparent 24%),
+      linear-gradient(90deg,#0a1724bd,transparent 49%);
+  }
+  .city-intro {
+    width:min(40vw,540px);
+    padding:0;
+    border:0;
+    background:none;
+    box-shadow:none;
+    color:#fff3da;
+  }
+  .city-intro::after { content:none }
+  .city-intro .scene-label { color:#e8d2a6 }
+  .city-intro h1 { font-size:clamp(50px,5.8vw,92px) }
+  .city-line:nth-child(2) > span { color:#e7cda1 }
+  .city-lede { color:#efe5d5 }
+  .city-next:not([data-recommended]) { display:none }
+  .city-dock {
+    overflow:hidden;
+    border-color:#d0d7d448;
+    border-radius:15px;
+    background:#12202de6;
+  }
+  .city-dock a+a { border-color:#ccd4df32 }
+  .dock-icon { width:auto; border:0 }
+}
+
+@media (min-width: 941px) {
+  body[data-route="home"] .bar .quick-nav { display:none }
+  body[data-route="home"] .bar #motion { border-radius:999px }
+  body[data-route="home"] .bar .wordmark small { text-transform:uppercase; letter-spacing:.09em }
+  .city-intro { pointer-events:none }
+  .city-intro .city-next { pointer-events:auto }
+  .city-next:not(:has(.city-next-detail:not([hidden]))) { display:none }
+  .landmark-name { top:calc(50% + 23px); border:0; background:#09101ce8 }
+}

@@ -1,0 +1,196 @@
+.atlas-link {
+  display:inline-flex;
+  align-items:center;
+  gap:10px;
+  min-height:42px;
+  padding:5px 11px;
+  border:1px solid var(--sky-line);
+  background:#201a22d9;
+  color:var(--sky-paper);
+  text-decoration:none;
+}
+.atlas-link small {
+  border-left:1px solid var(--sky-line);
+  padding-inline-start:9px;
+  color:#e6c4a0;
+  font:600 .75rem/1.2 Inter,sans-serif;
+  font-variant-numeric:tabular-nums;
+}
+.atlas-link:hover { background:#3a2b30 }
+.skill-room {
+  min-height:100svh;
+  padding:calc(var(--chrome-height) + 30px) max(var(--edge),calc((100% - 1240px) / 2)) 48px;
+  color:var(--sky-paper);
+  background:
+    radial-gradient(ellipse at 24% 43%,#533b3e63,transparent 49%),
+    radial-gradient(ellipse at 90% 14%,#3c2f3473,transparent 42%),
+    var(--sky-ink);
+}
+.skill-nav { display:flex; flex-wrap:wrap; align-items:center; gap:8px 18px }
+.skill-back {
+  display:inline-flex;
+  align-items:center;
+  width:fit-content;
+  min-height:42px;
+  color:var(--sky-muted);
+  font-size:.88rem;
+  text-decoration-color:#c2a1859c;
+  text-underline-offset:4px;
+}
+.skill-back:hover { color:var(--sky-paper) }
+.atlas-heading {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:end;
+  justify-content:space-between;
+  gap:14px;
+  margin:24px 0 27px;
+  padding-bottom:21px;
+  border-bottom:1px solid var(--sky-line);
+}
+.atlas-heading h1,.skill-reading h1 {
+  font:400 clamp(40px,5.15vw,73px)/1.12 var(--editorial-serif);
+  letter-spacing:-.055em;
+}
+.atlas-heading p,.skill-reading header p { color:var(--sky-muted); margin-top:7px }
+.atlas-heading .atlas-progress { margin:0; color:#ead7c2 }
+.atlas-progress strong { margin-left:6px; color:#ffe1bc; font-variant-numeric:tabular-nums }
+.atlas-grid {
+  list-style:none;
+  padding:0;
+  margin:0;
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:clamp(13px,2vw,27px);
+}
+.atlas-grid li { min-width:0 }
+.atlas-card,.skill-sheet {
+  --card-mat:color-mix(in srgb,var(--skill-ink) 9%,#2b222b);
+  position:relative;
+  isolation:isolate;
+  display:block;
+  border:1px solid var(--sky-line);
+  background:var(--card-mat);
+  color:var(--sky-paper);
+  padding:9px;
+  text-decoration:none;
+}
+.atlas-card {
+  height:100%;
+  transition:transform .27s var(--cinema-ease),border-color .25s,box-shadow .25s;
+}
+.atlas-card:is(:hover,:focus-visible) {
+  transform:translateY(-5px);
+  border-color:var(--skill-ink);
+  box-shadow:0 16px 38px #08060b78;
+}
+.atlas-card[data-collected="true"],.skill-sheet[data-collected="true"] { border-color:var(--skill-ink) }
+.skill-art {
+  position:relative;
+  isolation:isolate;
+  aspect-ratio:1.01;
+  overflow:hidden;
+  display:grid;
+  place-items:center;
+  border:1px solid #e3c4a353;
+  background:
+    radial-gradient(ellipse at 44% 52%,color-mix(in srgb,var(--skill-ink) 31%,#33252c),transparent 64%),
+    radial-gradient(ellipse at 77% 89%,#714b3f86,transparent 50%),
+    #17141e;
+}
+.skill-art-axis {
+  position:absolute;
+  z-index:-1;
+  width:88%;
+  height:27%;
+  transform:rotate(-25deg);
+  border:1px solid color-mix(in srgb,var(--skill-ink) 53%,transparent);
+  border-radius:50%;
+  box-shadow:0 0 0 9px #e9c79b10,0 0 24px #e9c79b19;
+}
+.skill-art .planet-surface { width:56%; }
+.skill-art-symbol {
+  position:absolute;
+  top:10px;
+  left:12px;
+  color:var(--skill-ink);
+  font:650 clamp(.76rem,1.2vw,1rem)/1 Inter,sans-serif;
+  letter-spacing:.085em;
+}
+.atlas-card[data-collected="false"] .skill-art .planet-surface { filter:brightness(.75) saturate(.67) }
+.atlas-card-name { display:grid; gap:4px; padding:12px 7px 10px }
+.atlas-card-name strong { font:400 clamp(19px,2.05vw,32px)/1.15 var(--editorial-serif) }
+.atlas-card-name > span,.atlas-storage { color:var(--sky-muted); font-size:.79rem }
+.atlas-card-status {
+  display:flex;
+  justify-content:space-between;
+  border-top:1px solid var(--sky-line);
+  padding:8px 7px 3px;
+  color:var(--sky-muted);
+  font-size:.77rem;
+}
+.atlas-card[data-collected="true"] .atlas-card-status { color:var(--skill-ink) }
+.atlas-storage { margin:19px 0 0 }
+.skill-layout {
+  display:grid;
+  grid-template-columns:minmax(0,.7fr) minmax(0,1.3fr);
+  align-items:start;
+  gap:clamp(26px,5.4vw,75px);
+  margin-top:21px;
+}
+.skill-sheet {
+  max-width:384px;
+  padding:11px;
+  outline:1px solid transparent;
+  box-shadow:0 19px 48px #08070d75;
+}
+.skill-sheet-caption { display:grid; gap:5px; padding:14px 7px 12px }
+.skill-sheet-caption span { color:var(--skill-ink); font-size:.8rem }
+.skill-sheet-caption strong { font:400 clamp(22px,2.55vw,36px)/1.15 var(--editorial-serif) }
+.skill-collect,.skill-action {
+  min-height:43px;
+  padding:7px 13px;
+  border:1px solid #e5c7a4;
+  background:#e5c7a4;
+  color:#251b20;
+  font-weight:650;
+}
+.skill-collect { width:100% }
+.skill-collect:is(:hover,:focus-visible),.skill-action:hover { background:#ffdfb8 }
+.skill-collect[aria-pressed="true"] { border-color:var(--skill-ink); background:#2b3030; color:var(--skill-ink) }
+.skill-collect-status { color:var(--sky-muted); margin:5px 4px 0; font-size:.76rem }
+.skill-collect-status:empty { display:none }
+.skill-reading { min-width:0 }
+.skill-reading h1 { font-size:clamp(38px,4.2vw,61px) }
+.skill-notes {
+  margin:22px 0 19px;
+  border-block:1px solid var(--sky-line);
+  padding:8px 0;
+}
+.skill-notes > div {
+  display:grid;
+  grid-template-columns:minmax(98px,.38fr) 1fr;
+  gap:8px 14px;
+  padding:9px 0;
+}
+.skill-notes dt { color:var(--skill-ink); font-weight:650 }
+.skill-notes dd { margin:0; color:var(--sky-paper) }
+.skill-practice { border:1px solid var(--sky-line); background:#29212ac7 }
+.skill-practice summary { cursor:pointer; padding:11px 14px; font-weight:650 }
+.skill-practice form { padding:0 14px 14px }
+.skill-practice fieldset { padding:0; border:0; margin:0 0 10px; min-width:0 }
+.skill-practice legend { padding:2px 0 9px; font-size:.9rem }
+.skill-practice label { display:flex; align-items:start; padding:8px; color:var(--sky-paper); font-weight:400 }
+.skill-practice label:has(:checked) { background:#3b2e37 }
+.skill-practice input { width:auto; min-width:auto; margin:4px 5px 0 0; accent-color:#ddb38a }
+.skill-answer { margin:10px 0 0; color:#f2d7b8; line-height:1.55 }
+.skill-careers { margin-top:20px }
+.skill-careers h2 { font-size:1rem }
+.skill-careers ul { display:flex; flex-wrap:wrap; gap:0 15px; padding:0; margin:4px 0 0; list-style:none }
+.skill-careers .planet-role { color:var(--sky-paper) }
+.skill-careers .planet-role:is(:hover,:focus-visible) { color:var(--skill-ink) }
+.skill-reference { margin-top:12px; font-size:.77rem; color:var(--sky-muted) }
+@media (max-width:850px) {
+  .atlas-grid { grid-template-columns:repeat(2,minmax(0,1fr)) }
+  .skill-layout { grid-template-columns:1fr }
+}
