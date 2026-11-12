@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import java.lang.reflect.Method;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -32,6 +33,21 @@ class InterviewServiceProjectEvidenceTest {
         assertTrue(evidence.techStack().contains("Redis"));
         assertTrue(evidence.challenge().contains("重复下单"));
         assertEquals("企业保密项目", evidence.confidentiality());
+    }
+
+
+    @Test
+    void preservesStructuredEvidenceDetailsSubmittedByCandidate() throws Exception {
+        InterviewProjectEvidence supplied = new InterviewProjectEvidence(
+                "企业订单系统", "后端开发", "5人", "入口到返回", "Java、Redis",
+                "订单接口", "重复下单", "测试通过", "企业保密项目", "",
+                Map.of("ownedModules", "独立实现订单接口", "coreApi", "POST /orders"));
+        Method method = InterviewService.class.getDeclaredMethod(
+                "projectEvidence", InterviewProjectEvidence.class, ResumeView.class);
+        method.setAccessible(true);
+        InterviewProjectEvidence evidence = (InterviewProjectEvidence) method.invoke(service(), supplied, resume());
+        assertEquals("独立实现订单接口", evidence.evidenceDetails().get("ownedModules"));
+        assertEquals("POST /orders", evidence.evidenceDetails().get("coreApi"));
     }
 
     @Test

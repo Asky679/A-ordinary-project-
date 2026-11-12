@@ -57,7 +57,7 @@ public class InterviewSkillEvidenceService {
         if (skills.isEmpty()) return List.of();
         List<InterviewSkillEvidence> assessed = model == null || !model.available()
                 ? List.of() : assessWithModel(skills, safe(resume == null ? null : resume.skills()),
-                        transcript, safeMessages, projectEvidence);
+                        transcript, safeMessages, projectEvidence, jobBlueprint);
         if (assessed.isEmpty()) assessed = fallback(skills, transcript, safeMessages, overallScore);
         return assessed;
     }
@@ -98,7 +98,8 @@ public class InterviewSkillEvidenceService {
 
     private List<InterviewSkillEvidence> assessWithModel(Set<String> skills, List<String> resumeSkills,
                                                           String transcript, List<InterviewMessage> messages,
-                                                          InterviewProjectEvidence projectEvidence) {
+                                                          InterviewProjectEvidence projectEvidence,
+                                                          JobInterviewBlueprint jobBlueprint) {
         String prompt = """
                 你是计算机岗位的技能面试验证器。请只评估下面岗位要求中的技能。
                 技能列表：%s

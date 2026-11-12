@@ -351,50 +351,172 @@
             <div><span class="eyebrow">AI INTERVIEW &amp; DIAGNOSIS</span><h1>模拟面试</h1><p>先选择岗位并填写脱敏项目证据卡，完成八轮项目追问后才开放简历诊断。</p></div>
             <span class="session-status" id="interview-status">尚未开始</span>
           </div>
-          <div class="interview-layout">
-            <aside class="panel interview-setup">
-              <span class="eyebrow">SESSION SETUP</span><h3>配置本场面试</h3>
-              <label><span>选择简历 *</span><select id="interview-resume"></select></label>
-              <label><span>目标岗位 *</span><select id="interview-job"></select></label>
-              <details class="project-evidence-card" id="project-evidence-card" open>
-                <summary><div><span class="eyebrow">PROJECT EVIDENCE</span><strong>脱敏项目证据卡</strong></div><small>无需源码 / ZIP</small></summary>
-                <div class="project-evidence-fields">
-                  <label><span>从简历选择项目</span><select id="interview-project-select"></select></label>
-                  <label><span>项目名称</span><input id="evidence-project-name" placeholder="例如：企业订单系统"></label>
-                  <label><span>技术栈</span><input id="evidence-technical-stack" placeholder="例如：Java、Spring Boot、MySQL、Redis、MQ"></label>
-                  <div class="project-evidence-grid">
-                    <label><span>我的角色</span><input id="evidence-role" placeholder="例如：后端开发"></label>
-                    <label><span>团队规模</span><input id="evidence-team-size" placeholder="例如：5 人"></label>
-                    <label><span>信息范围</span><select id="evidence-confidentiality"><option>企业保密项目</option><option>个人公开项目</option><option>课程/校园项目</option></select></label>
-                  </div>
-                  <label><span>核心业务链路</span><textarea id="evidence-business-flow" rows="2" placeholder="用户请求 → 服务处理 → 数据变化 → 返回结果"></textarea></label>
-                  <label><span>关键实现与技术选择</span><textarea id="evidence-implementation" rows="2" placeholder="负责模块、技术栈、关键实现"></textarea></label>
-                  <label><span>故障 / 难点与处理</span><textarea id="evidence-challenge" rows="2" placeholder="发生了什么、如何定位、如何修复"></textarea></label>
-                  <label><span>成果与验证方式</span><textarea id="evidence-result" rows="2" placeholder="基线、测试方法、结果和你个人能负责的范围"></textarea></label>
-                  <label><span>补充说明（可选）</span><textarea id="evidence-notes" rows="2" placeholder="只填写脱敏信息，不要提供公司内部数据、客户信息或源码"></textarea></label>
+          <section class="panel evidence-intake" id="project-evidence-gate">
+            <div class="evidence-intake-head">
+              <div class="evidence-intake-title">
+                <span class="evidence-step-badge">STEP 1 · 必须先完成</span>
+                <h2>先配置项目脱敏卡，再开始面试</h2>
+                <p>没有源码也能证明项目：把“我负责什么、系统怎样流转、遇到什么问题、结果怎样验证”写清楚，面试官才能围绕事实连续追问。</p>
+              </div>
+              <div class="evidence-readiness" id="evidence-readiness">
+                <strong id="evidence-completion">0%</strong>
+                <span>证据卡完成度</span>
+                <b id="evidence-gate-state">待配置</b>
+              </div>
+            </div>
+            <div class="evidence-progress-track" aria-hidden="true"><i id="evidence-progress-bar"></i></div>
+            <div class="evidence-principles">
+              <span><b>1</b><strong>选择简历与岗位</strong><small>确定本场面试目标</small></span>
+              <span><b>2</b><strong>补全项目事实</strong><small>只写脱敏后的信息</small></span>
+              <span><b>3</b><strong>确认后进入面试</strong><small>完成八轮项目追问</small></span>
+            </div>
+
+            <div class="evidence-intake-body">
+              <div class="evidence-context-column">
+                <div class="evidence-section-label"><span>01</span> 面试上下文</div>
+                <label class="evidence-field"><span>选择简历 <em>*</em></span><select id="interview-resume"></select></label>
+                <label class="evidence-field"><span>目标岗位 <em>*</em></span><select id="interview-job"></select></label>
+                <label class="evidence-field"><span>面试强度</span><div class="segmented" id="interview-difficulty"><button class="active" data-value="标准">标准</button><button data-value="压力">压力</button></div></label>
+                <div class="interview-context-card"><span>当前简历</span><strong id="interview-resume-label">—</strong></div>
+                <div class="interview-context-card"><span>当前岗位</span><strong id="interview-job-label">—</strong></div>
+                <div class="evidence-privacy-note">
+                  <span>隐私边界</span>
+                  <p>不要求 GitHub、ZIP 或企业源码。请勿填写客户信息、公司内部接口、真实业务数据或未公开源码。</p>
                 </div>
-                <p class="project-evidence-privacy">企业项目只使用脱敏模块和业务描述。系统不需要源码、ZIP、公司内部接口或真实客户数据。</p>
-              </details>
-              <label><span>面试强度</span><div class="segmented" id="interview-difficulty"><button class="active" data-value="标准">标准</button><button data-value="压力">压力</button></div></label>
-              <button class="primary-button full" id="start-interview">启动模拟面试 <span>→</span></button>
-              <div class="interview-context-card"><span>当前简历</span><strong id="interview-resume-label">—</strong></div>
-              <div class="interview-context-card"><span>当前岗位</span><strong id="interview-job-label">—</strong></div>
-              <div class="interview-focus-card"><span>岗位考察方向</span><div id="interview-focus-tags" class="interview-focus-tags"><small>选择岗位后自动生成</small></div><p>问题优先围绕岗位技能和任职要求，简历用于选择项目载体。</p></div>
+              </div>
+
+              <div class="evidence-fields-column">
+                <div class="evidence-section-label"><span>02</span> 项目证据 <small id="evidence-draft-status">9 个模块 · 自动保存</small></div>
+                <div class="evidence-autofill-note"><b>简历只负责预填</b><span>项目名、角色和技术栈可从简历带出；责任边界、调用链、接口、数据模型、取舍、故障和验证必须由本人补充。</span></div>
+                <label class="evidence-field evidence-project-picker"><span>从简历选择项目</span><select id="interview-project-select"></select></label>
+
+                <div class="evidence-module-grid">
+                  <section class="evidence-module evidence-module-wide" data-evidence-module="profile">
+                    <div class="evidence-module-head"><div><b>01</b><strong>项目定位与规模</strong></div><span data-evidence-module-status="profile">待完善</span></div>
+                    <div class="evidence-fields-grid">
+                      <label class="evidence-field"><span>项目名称 <em>*</em></span><input id="evidence-project-name" data-evidence-field="projectName" placeholder="例如：企业订单系统"></label>
+                      <label class="evidence-field"><span>我的角色 <em>*</em></span><input id="evidence-role" data-evidence-field="role" placeholder="例如：后端负责人"></label>
+                      <label class="evidence-field"><span>团队规模</span><input id="evidence-team-size" placeholder="例如：5 人；个人项目填 1 人"></label>
+                      <label class="evidence-field"><span>信息范围</span><select id="evidence-confidentiality"><option>企业保密项目</option><option>个人公开项目</option><option>课程/校园项目</option></select></label>
+                      <label class="evidence-field evidence-field-wide"><span>技术栈 <em>*</em></span><input id="evidence-technical-stack" data-evidence-field="techStack" placeholder="例如：Java、Spring Boot、MySQL、Redis、MQ"></label>
+                      <label class="evidence-field evidence-field-wide"><span>一句话项目定位 <em>*</em></span><textarea id="evidence-project-summary" data-evidence-field="projectSummary" rows="2" placeholder="不要写“实现了某某系统”，要写：为谁解决什么问题，规模或约束是什么"></textarea></label>
+                    </div>
+                  </section>
+
+                  <section class="evidence-module" data-evidence-module="ownership">
+                    <div class="evidence-module-head"><div><b>02</b><strong>个人责任地图</strong></div><span data-evidence-module-status="ownership">待完善</span></div>
+                    <div class="evidence-fields-stack">
+                      <label class="evidence-field"><span>我独立完成 <em>*</em></span><textarea id="evidence-owned-modules" data-evidence-field="ownedModules" rows="3" placeholder="2～3项：我独立写过的接口、模块或技术动作"></textarea></label>
+                      <label class="evidence-field"><span>我参与完成</span><textarea id="evidence-participated-modules" data-evidence-field="participatedModules" rows="2" placeholder="只负责配合、联调或部分修改的内容"></textarea></label>
+                      <label class="evidence-field"><span>明确不是我做的 <em>*</em></span><textarea id="evidence-not-owned-modules" data-evidence-field="notOwnedModules" rows="2" placeholder="例如：支付、后台审核、前端页面不是我负责"></textarea></label>
+                    </div>
+                  </section>
+
+                  <section class="evidence-module" data-evidence-module="flow">
+                    <div class="evidence-module-head"><div><b>03</b><strong>端到端调用链</strong></div><span data-evidence-module-status="flow">待完善</span></div>
+                    <div class="evidence-fields-stack">
+                      <label class="evidence-field"><span>用户入口 <em>*</em></span><input id="evidence-entry-point" data-evidence-field="entryPoint" placeholder="例如：商品页点击立即购买"></label>
+                      <label class="evidence-field"><span>请求处理 <em>*</em></span><textarea id="evidence-processing-chain" data-evidence-field="processingChain" rows="3" placeholder="鉴权 → Controller → Service → 校验 / 锁 / 事务"></textarea></label>
+                      <label class="evidence-field"><span>数据变化 <em>*</em></span><textarea id="evidence-data-change" data-evidence-field="dataChange" rows="2" placeholder="写入了哪些表、修改了哪些状态、是否使用缓存"></textarea></label>
+                      <label class="evidence-field"><span>返回结果 <em>*</em></span><input id="evidence-response-path" data-evidence-field="responsePath" placeholder="例如：返回订单号、订单状态和提示信息"></label>
+                    </div>
+                  </section>
+
+                  <section class="evidence-module" data-evidence-module="api">
+                    <div class="evidence-module-head"><div><b>04</b><strong>核心接口</strong></div><span data-evidence-module-status="api">待完善</span></div>
+                    <div class="evidence-fields-stack">
+                      <label class="evidence-field"><span>接口与用途 <em>*</em></span><input id="evidence-core-api" data-evidence-field="coreApi" placeholder="例如：POST /orders 创建订单"></label>
+                      <label class="evidence-field"><span>请求、返回、校验、权限与异常 <em>*</em></span><textarea id="evidence-api-contract" data-evidence-field="apiContract" rows="5" placeholder="请求字段 / 返回字段 / 参数校验 / 登录权限 / 异常码"></textarea></label>
+                    </div>
+                  </section>
+
+                  <section class="evidence-module" data-evidence-module="dataModel">
+                    <div class="evidence-module-head"><div><b>05</b><strong>核心数据模型</strong></div><span data-evidence-module-status="dataModel">待完善</span></div>
+                    <div class="evidence-fields-grid">
+                      <label class="evidence-field"><span>核心表 <em>*</em></span><input id="evidence-core-tables" data-evidence-field="coreTables" placeholder="例如：user、product、order"></label>
+                      <label class="evidence-field"><span>关键状态 <em>*</em></span><input id="evidence-state-transitions" data-evidence-field="stateTransitions" placeholder="例如：CREATED → PAID → CANCELLED"></label>
+                      <label class="evidence-field evidence-field-wide"><span>关键字段与关系 <em>*</em></span><textarea id="evidence-key-fields-relations" data-evidence-field="keyFieldsRelations" rows="3" placeholder="核心字段、一对一 / 一对多关系、为什么这样设计"></textarea></label>
+                      <label class="evidence-field evidence-field-wide"><span>索引与原因</span><textarea id="evidence-indexes" data-evidence-field="indexes" rows="2" placeholder="例如：对 category_id + status 建联合索引，因为列表查询按这两个字段过滤"></textarea></label>
+                    </div>
+                  </section>
+
+                  <section class="evidence-module evidence-module-wide" data-evidence-module="decisions">
+                    <div class="evidence-module-head"><div><b>06</b><strong>关键技术决策</strong></div><span data-evidence-module-status="decisions">待完善</span></div>
+                    <div class="evidence-decision-grid">
+                      <div class="evidence-decision-card">
+                        <h4>技术决策 1 <em>*</em></h4>
+                        <label class="evidence-field"><span>选择了什么方案</span><input id="evidence-decision-one-title" data-evidence-field="decisionOneTitle" placeholder="例如：商品详情使用 Redis 缓存"></label>
+                        <label class="evidence-field"><span>未采用的替代方案</span><input id="evidence-decision-one-alternative" data-evidence-field="decisionOneAlternative" placeholder="例如：每次都查 MySQL"></label>
+                        <label class="evidence-field"><span>选择原因与副作用</span><textarea id="evidence-decision-one-tradeoff" data-evidence-field="decisionOneTradeoff" rows="3" placeholder="为什么这样选？牺牲了什么？缓存不一致如何处理？"></textarea></label>
+                      </div>
+                      <div class="evidence-decision-card">
+                        <h4>技术决策 2 <em>*</em></h4>
+                        <label class="evidence-field"><span>选择了什么方案</span><input id="evidence-decision-two-title" data-evidence-field="decisionTwoTitle" placeholder="例如：订单创建使用数据库事务"></label>
+                        <label class="evidence-field"><span>未采用的替代方案</span><input id="evidence-decision-two-alternative" data-evidence-field="decisionTwoAlternative" placeholder="例如：先扣库存再异步建订单"></label>
+                        <label class="evidence-field"><span>选择原因与副作用</span><textarea id="evidence-decision-two-tradeoff" data-evidence-field="decisionTwoTradeoff" rows="3" placeholder="为什么不用另一个方案？带来什么限制？"></textarea></label>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="evidence-module" data-evidence-module="failure">
+                    <div class="evidence-module-head"><div><b>07</b><strong>故障与修复档案</strong></div><span data-evidence-module-status="failure">待完善</span></div>
+                    <div class="evidence-fields-stack">
+                      <label class="evidence-field"><span>故障现象与影响 <em>*</em></span><textarea id="evidence-fault-symptom" data-evidence-field="faultSymptom" rows="2" placeholder="发生了什么？影响了谁？怎么发现的？"></textarea></label>
+                      <label class="evidence-field"><span>定位过程与根因 <em>*</em></span><textarea id="evidence-fault-diagnosis" data-evidence-field="faultDiagnosis" rows="3" placeholder="检查了哪些日志、请求或数据？根因是什么？"></textarea></label>
+                      <label class="evidence-field"><span>修复与回归验证 <em>*</em></span><textarea id="evidence-fault-fix" data-evidence-field="faultFixVerification" rows="3" placeholder="如何修复？如何证明问题不再复现？"></textarea></label>
+                    </div>
+                  </section>
+
+                  <section class="evidence-module" data-evidence-module="results">
+                    <div class="evidence-module-head"><div><b>08</b><strong>结果、证据与未统计项</strong></div><span data-evidence-module-status="results">待完善</span></div>
+                    <div class="evidence-fields-stack">
+                      <label class="evidence-field"><span>测试范围 <em>*</em></span><textarea id="evidence-test-coverage" data-evidence-field="testCoverage" rows="2" placeholder="覆盖了哪些正常、异常、边界和重复请求场景"></textarea></label>
+                      <label class="evidence-field"><span>可提供的证据 <em>*</em></span><input id="evidence-available-proof" data-evidence-field="evidenceAvailable" placeholder="接口截图 / 测试记录 / 部署截图 / 无法提供"></label>
+                      <label class="evidence-field"><span>没有统计或无法证明的数据 <em>*</em></span><textarea id="evidence-unmeasured" data-evidence-field="unmeasuredData" rows="2" placeholder="例如：没有线上 QPS、没有真实并发数据；不要编造"></textarea></label>
+                    </div>
+                  </section>
+
+                  <section class="evidence-module evidence-module-wide" data-evidence-module="boundary">
+                    <div class="evidence-module-head"><div><b>09</b><strong>能力边界与扩展方案</strong></div><span data-evidence-module-status="boundary">待完善</span></div>
+                    <div class="evidence-fields-grid">
+                      <label class="evidence-field"><span>没有实现 <em>*</em></span><textarea id="evidence-unimplemented" data-evidence-field="unimplemented" rows="2" placeholder="例如：没有支付、退款、消息队列"></textarea></label>
+                      <label class="evidence-field"><span>已知问题 <em>*</em></span><textarea id="evidence-known-limitations" data-evidence-field="knownLimitations" rows="2" placeholder="例如：缓存一致性只做了删除缓存"></textarea></label>
+                      <label class="evidence-field evidence-field-wide"><span>规模扩大后的调整 <em>*</em></span><textarea id="evidence-scale-plan" data-evidence-field="scalePlan" rows="3" placeholder="如果用户量、订单量或数据量扩大10倍，你先改哪里？为什么？"></textarea></label>
+                      <label class="evidence-field evidence-field-wide"><span>补充脱敏说明（可选）</span><textarea id="evidence-notes" rows="2" placeholder="只填写脱敏信息，不要提供公司内部数据、客户信息或源码"></textarea></label>
+                    </div>
+                  </section>
+                </div>
+              </div>
+            </div>
+
+            <div class="evidence-intake-foot">
+              <div><strong id="evidence-gate-message">先完成必填信息，面试入口会自动解锁</strong><p>填写范围内即可，不要为了“好看”编造数据；无法确认的数字请写“未统计”。</p></div>
+              <button class="primary-button evidence-start-button" id="start-interview" type="button" disabled>完成证据卡后开始面试 <span>→</span></button>
+            </div>
+          </section>
+
+          <div class="interview-layout interview-stage-shell" id="interview-stage-shell" hidden>
+            <aside class="panel interview-setup">
+              <span class="eyebrow">INTERVIEW SESSION</span><h3>本场面试已就绪</h3>
+              <div class="evidence-ready-summary">
+                <span>✓</span>
+                <div><strong>脱敏项目证据卡已确认</strong><p>面试官将围绕证据卡和岗位 JD 展开八轮追问。</p></div>
+              </div>
+              <div class="interview-focus-card"><span>岗位考察方向</span><div id="interview-focus-tags" class="interview-focus-tags"><small>正在生成岗位考察方向</small></div><p>问题优先围绕岗位技能和任职要求，简历用于选择项目载体。</p></div>
               <div class="interview-blueprint-panel" id="interview-blueprint-panel">
                 <div class="interview-blueprint-head"><span class="eyebrow">JD INTERVIEW BLUEPRINT</span><b>JD 面试蓝图</b></div>
-                <p>选择岗位后，从岗位库中的技能、职责、经验和行业数据生成。</p>
+                <p>正在从岗位库中的技能、职责、经验和行业数据生成。</p>
               </div>
               <div class="interview-stage-list compact"><span><i>1</i>职责边界</span><span><i>2</i>业务链路</span><span><i>3</i>技术实现</span><span><i>4</i>故障与边界</span><span><i>5</i>方案取舍</span><span><i>6</i>结果验证</span></div>
               <p class="interview-stage-note">六个主题之后，系统会根据回答薄弱点追加“证据补强”和“迁移验证”两轮。</p>
-              <div class="setup-note"><i>✦</i><p>不选择岗位不能开始面试。企业项目无需上传源码，只需填写脱敏项目证据卡。未完成本场面试不会生成诊断分。</p></div>
+              <div class="setup-note"><i>✦</i><p>未完成本场八轮面试不会生成诊断分。若切换简历或岗位，需要重新确认证据卡。</p></div>
             </aside>
             <article class="panel chat-panel">
-              <div class="chat-head"><div class="interviewer-avatar"><span>AI</span><i></i></div><div><strong>职航面试官</strong><small id="chat-job-title">等待选择目标岗位</small></div><div class="round-progress"><span id="round-text">0 / 8</span><div><i id="round-bar"></i></div></div></div>
-              <div id="chat-messages" class="chat-messages"><div class="chat-empty"><div class="empty-orbit">AI</div><h3>选择岗位后开始面试</h3><p>八轮项目追问会形成职责、链路、实现和结果证据，完成后解锁简历诊断。</p></div></div>
+              <div class="chat-head"><div class="interviewer-avatar"><span>AI</span><i></i></div><div><strong>职航面试官</strong><small id="chat-job-title">正在准备面试</small></div><div class="round-progress"><span id="round-text">0 / 8</span><div><i id="round-bar"></i></div></div></div>
+              <div id="chat-messages" class="chat-messages"><div class="chat-empty"><div class="empty-orbit">AI</div><h3>项目证据卡已确认</h3><p>八轮项目追问会形成职责、链路、实现和结果证据，完成后解锁简历诊断。</p></div></div>
               <div class="answer-box"><textarea id="interview-answer" rows="3" placeholder="结合真实项目回答；说明原理、你的动作、边界与验证结果..."></textarea><div><span>Enter 发送 · Shift + Enter 换行</span><button class="primary-button" id="send-answer">发送回答 ↑</button></div></div>
             </article>
-          </div>
-          <section class="panel interview-diagnosis-panel" id="interview-diagnosis-panel" hidden>
+          </div>          <section class="panel interview-diagnosis-panel" id="interview-diagnosis-panel" hidden>
             <div class="interview-diagnosis-head"><div><span class="eyebrow">POST-INTERVIEW DIAGNOSIS</span><h2>面试后简历诊断</h2><p>只有本场面试完成后才允许生成诊断分。</p></div><div class="diagnosis-actions"><button class="primary-button" id="run-interview-diagnosis">生成简历诊断</button></div></div>
             <div id="interview-diagnosis-content"></div>
           </section>
@@ -456,3 +578,4 @@
   <script src="/app.js"></script>
 </body>
 </html>
+

@@ -185,7 +185,15 @@ public final class ApiModels {
     public record InterviewProjectEvidence(String projectName, String role, String teamSize,
                                            String businessFlow, String techStack, String implementation,
                                            String challenge, String resultEvidence, String confidentiality,
-                                           String notes) {}
+                                           String notes, Map<String, String> evidenceDetails) {
+        public InterviewProjectEvidence(String projectName, String role, String teamSize,
+                                        String businessFlow, String techStack, String implementation,
+                                        String challenge, String resultEvidence, String confidentiality,
+                                        String notes) {
+            this(projectName, role, teamSize, businessFlow, techStack, implementation,
+                    challenge, resultEvidence, confidentiality, notes, Map.of());
+        }
+    }
 
     public record InterviewStartRequest(@NotNull(message = "请选择简历") Long resumeId,
                                         @NotNull(message = "请选择目标岗位") Long jobId,

@@ -148,3 +148,9 @@ LLM 理解岗位
 - `job_ids` 的防幻觉校验按 `resumeId` 分桶，单机演示足够；多租户部署需要改成按请求隔离。
 - Qdrant 的 `careernav_jobs` payload 只存了 job_id/title/company/city 等少量字段，
   所以召回后必须回 PostgreSQL 取详情——这一层由 Java 的 `/api/jobs/hybrid` 已经完成。
+## 真实面试模式库
+
+当前 `data/interview-experiences/patterns.jsonl` 从 33 份真实面试对话/面经材料中提炼出 407 条提问模式。2026-11-12 新增 13 份 Java 实战面试对话，新增 187 条模式，覆盖项目职责、业务链路、技术实现、故障边界、方案取舍和结果验证。
+
+题库只保存问题、追问链、阶段、标签和来源元数据，不把候选人答案当作标准答案。原始对话数据位于本地 `data/` 目录，不随公共仓库发布；使用时应保留来源、遵守授权范围，并避免传播个人信息。
+

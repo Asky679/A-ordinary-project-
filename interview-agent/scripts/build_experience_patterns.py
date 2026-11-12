@@ -48,6 +48,45 @@ OVERRIDES = {
     "一年经验Java开发_MES制造系统背景.txt": {
         "role": "Java 后端开发", "companyType": "制造业信息化", "level": "一年经验"
     },
+    "实战面试_面试去实习的.txt": {
+        "role": "Java/数据方向实习", "companyType": "中小厂/实习面试", "level": "实习", "outcome": "一面通过/进入下一轮"
+    },
+    "实战面试_自己开发的项目能讲解溜吗.txt": {
+        "role": "Java 后端开发", "companyType": "中小厂/实战面试", "level": "社招", "outcome": ""
+    },
+    "大厂我来了_三年经验基金业务.txt": {
+        "role": "Java 后端开发", "companyType": "大厂", "level": "三年经验", "outcome": ""
+    },
+    "实战面试_2年经验_面试官很中意.txt": {
+        "role": "Java 后端开发", "companyType": "中小厂", "level": "两年经验", "outcome": "面试官中意/未给正式结论"
+    },
+    "5年Java高级开发_字节社招一面.txt": {
+        "role": "Java 后端开发", "companyType": "字节/大厂", "level": "五年经验", "outcome": ""
+    },
+    "Java实战面试_一面通过_八股快筛.txt": {
+        "role": "Java 后端开发", "companyType": "中小厂", "level": "校招/社招", "outcome": "一面通过"
+    },
+    "初面_感觉有点紧张啊.txt": {
+        "role": "Java 后端开发", "companyType": "中小厂/初面", "level": "校招/社招", "outcome": ""
+    },
+    "三年经验Java开发_没学过这课不行.txt": {
+        "role": "Java 后端开发", "companyType": "社招/中小厂", "level": "三年经验", "outcome": ""
+    },
+    "典型 Java 实战面试.txt": {
+        "role": "Java 后端开发", "companyType": "中小厂", "level": "校招/社招", "outcome": ""
+    },
+    "阿里外包驻场 Java.txt": {
+        "role": "Java 后端开发", "companyType": "阿里外包/驻场", "level": "社招", "outcome": ""
+    },
+    "经纬恒润 Java 开发.txt": {
+        "role": "Java 后端开发", "companyType": "经纬恒润/中厂", "level": "校招/社招", "outcome": ""
+    },
+    "携程 Java 开发.txt": {
+        "role": "Java 后端开发", "companyType": "携程/大厂", "level": "25届硕士/校招", "outcome": ""
+    },
+    "用友 Java 开发.txt": {
+        "role": "Java 后端开发", "companyType": "用友/企业软件", "level": "五年经验", "outcome": ""
+    },
 }
 
 
@@ -79,10 +118,14 @@ def section_blocks(text: str) -> list[tuple[str, list[str]]]:
         line = raw.rstrip()
         heading_md = re.match(r"^##+\s+(.+)$", line.strip())
         heading_txt = re.match(r"^【(.+)】\s*$", line.strip())
-        if heading_md or heading_txt:
+        heading_cn = re.match(r"^([一二三四五六七八九十百]+)[、.．]\s*(.+)$", line.strip())
+        if heading_md or heading_txt or heading_cn:
             if current_lines:
                 sections.append((current_title, current_lines))
-            current_title = (heading_md or heading_txt).group(1).strip()
+            if heading_md or heading_txt:
+                current_title = (heading_md or heading_txt).group(1).strip()
+            else:
+                current_title = heading_cn.group(2).strip()
             current_lines = []
         else:
             current_lines.append(line)
@@ -114,10 +157,10 @@ def interviewer_blocks(lines: list[str]) -> list[str]:
         line = raw.strip()
         if not line or set(line) <= {"-", "="}:
             continue
-        speaker_match = re.search(r"(面试官|面试者|被面试者|候选人)\*{0,2}\s*[:：]\s*(.*)$", line)
+        speaker_match = re.search(r"(面试官[A-Za-z0-9一二三四五六七八九十]*|面试者|被面试者|候选人)\*{0,2}\s*[:：]\s*(.*)$", line)
         if speaker_match:
             flush()
-            speaker = "interviewer" if speaker_match.group(1) == "面试官" else "candidate"
+            speaker = "interviewer" if speaker_match.group(1).startswith("面试官") else "candidate"
             inline = speaker_match.group(2).strip()
             if inline:
                 buffer.append(inline)
@@ -151,12 +194,17 @@ def metadata(path: Path, text: str) -> dict:
     elif "被刷" in path.name or "露馅" in path.name:
         outcome = "未通过/被识破"
     override = OVERRIDES.get(path.name, {})
+    outcome = override.get("outcome", outcome)
     level = override.get("level")
     if not level:
-        for label in ("一年经验", "两年经验", "三年经验"):
+        for label in ("一年经验", "两年经验", "三年经验", "五年经验"):
             if label in path.name:
                 level = label
                 break
+        if not level:
+            year = re.search(r"(\d+)\s*年(?:经验|Java)", path.name)
+            if year:
+                level = year.group(1) + "年经验"
     return {
         "sourceTitle": title,
         "sourceUrl": source_url,

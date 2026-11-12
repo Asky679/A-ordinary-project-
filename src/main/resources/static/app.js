@@ -10,7 +10,7 @@ const state = {
   cityRequestId: 0, citySearchTimer: null, interviewEvidence: [], interviewEvidenceLoading: false,
   ahpProfile: null, resumeImport: null, educationReport: null, projectQuestionSet: null, projectQuestionStatus: {},
   projectQuestionDescription: '', projectAnswers: {}, projectFollowUps: {}, projectFollowUpLoading: {},
-  jobBlueprint: null, jobBlueprintLoading: false, jobBlueprintCache: new Map()
+  jobBlueprint: null, jobBlueprintLoading: false, jobBlueprintCache: new Map(), evidenceDraftRestoredFor: ""
 };
 const pageTitles = { dashboard:'成长总览', resume:'简历工坊', library:'简历仓库', jobs:'岗位雷达', interview:'模拟面试', diagnosis:'简历诊断', 'project-questions':'项目面试助手' };
 const $ = (selector, root=document) => root.querySelector(selector);
@@ -41,7 +41,14 @@ function setOptions(select, items, valueKey, labelFn, placeholder) {
   if ([...select.options].some(option => option.value === previous)) select.value = previous;
 }
 function primaryResume() { return state.resumes.find(item => item.id === state.activeResumeId) || state.resumes[0] || null; }
-function jobById(id) { return state.jobs.find(item => item.id === Number(id)) || null; }
+function jobById(id) {
+  const target = Number(id);
+  return state.jobs.find(item => Number(item.id) === target)
+    || state.recommendations.find(item => Number(item.job?.id) === target)?.job
+    || state.cityJobs.find(item => Number(item.job?.id) === target)?.job
+    || state.dashboard?.topJobs?.find(item => Number(item.job?.id) === target)?.job
+    || null;
+}
 
 function navigate(view) {
   if (!pageTitles[view]) return;
@@ -113,8 +120,12 @@ function updateAgentStatus(status) {
 function populateAllSelects() {
   setOptions($('#interview-resume'), state.resumes, item => item.id, item => `${item.ownerName} · ${item.targetRole}`);
   setOptions($('#diagnosis-resume'), state.resumes, item => item.id, item => `${item.ownerName} · ${item.targetRole}`);
-  setOptions($('#interview-job'), state.jobs, item => item.id, item => `${item.title} · ${item.company}`, '请选择目标岗位');
-  setOptions($('#diagnosis-job'), state.jobs, item => item.id, item => `${item.title} · ${item.company}`, '请选择目标岗位');
+  const activeJob = jobById(state.activeJobId);
+  const selectableJobs = activeJob && !state.jobs.some(item => Number(item.id) === Number(activeJob.id))
+    ? [activeJob, ...state.jobs]
+    : state.jobs;
+  setOptions($('#interview-job'), selectableJobs, item => item.id, item => `${item.title} · ${item.company}`, '请选择目标岗位');
+  setOptions($('#diagnosis-job'), selectableJobs, item => item.id, item => `${item.title} · ${item.company}`, '请选择目标岗位');
   const cityOptions = (state.cityFacets || []).length
     ? state.cityFacets
     : [...new Set(state.jobs.map(item => item.city).filter(Boolean))].map(city => ({ city, count: null }));
@@ -127,8 +138,13 @@ function populateAllSelects() {
     $('#interview-resume').value = String(state.activeResumeId);
     $('#diagnosis-resume').value = String(state.activeResumeId);
   }
-  if (state.activeJobId && [...$('#diagnosis-job').options].some(option => option.value === String(state.activeJobId))) {
-    $('#diagnosis-job').value = String(state.activeJobId);
+  if (state.activeJobId) {
+    if ([...$('#interview-job').options].some(option => option.value === String(state.activeJobId))) {
+      $('#interview-job').value = String(state.activeJobId);
+    }
+    if ([...$('#diagnosis-job').options].some(option => option.value === String(state.activeJobId))) {
+      $('#diagnosis-job').value = String(state.activeJobId);
+    }
   }
   populateProjectEvidenceProjects();
 }
@@ -143,10 +159,12 @@ function resetInterviewWorkspace(status='尚未开始') {
   state.interview = null;
   state.interviewEvidence = [];
   hideInterviewDiagnosis();
+  const stage = $('#interview-stage-shell');
+  if (stage) stage.hidden = true;
   const statusNode = $('#interview-status');
   if (statusNode) { statusNode.textContent = status; statusNode.className = 'session-status'; }
   const messages = $('#chat-messages');
-  if (messages) messages.innerHTML = '<div class="chat-empty"><div class="empty-orbit">AI</div><h3>选择岗位后开始面试</h3><p>八轮项目追问会形成职责、链路、实现和结果证据，完成后解锁简历诊断。</p></div>';
+  if (messages) messages.innerHTML = '<div class="chat-empty"><div class="empty-orbit">AI</div><h3>正在准备本场面试</h3><p>八轮项目追问会形成职责、链路、实现和结果证据，完成后解锁简历诊断。</p></div>';
   if ($('#chat-job-title')) $('#chat-job-title').textContent = '等待选择目标岗位';
   if ($('#round-text')) $('#round-text').textContent = '0 / 8';
   if ($('#round-bar')) $('#round-bar').style.width = '0%';
@@ -162,6 +180,8 @@ function populateInterviewOptions() {
   $('#interview-resume-label').textContent = resumeId ? interviewResumeLabel(resumeId) : '—';
   $('#interview-job-label').textContent = jobId ? interviewJobLabel(jobId) : '请选择目标岗位';
   renderInterviewJobFocus(jobId);
+  updateEvidenceReadiness();
+  void restoreEvidenceDraft({ serverFallback:true });
 }
 function renderDiagnosisLocked(message='请先完成对应岗位的模拟面试，面试前不会显示最终诊断内容。') {
   const target = $('#diagnosis-content');
@@ -184,6 +204,19 @@ async function populateDiagnosisOptions() {
   const jobId = Number($('#diagnosis-job')?.value || 0);
   if (!resumeId) { renderDiagnosisLocked('请先保存并选择一份简历。'); return; }
   if (!jobId) { renderDiagnosisLocked('请选择目标岗位，并完成该岗位的模拟面试。'); return; }
+  try {
+    const reports = await api(`/api/diagnoses?resumeId=${resumeId}`);
+    const latestReport = (reports || [])
+      .filter(report => Number(report.jobId) === jobId)
+      .sort((a,b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))[0];
+    if (latestReport) {
+      state.diagnosis = latestReport;
+      const target = $('#diagnosis-content');
+      if (target) target.className = 'panel diagnosis-unlocked';
+      renderDiagnosis(latestReport, '#diagnosis-content');
+      return;
+    }
+  } catch (_) {}
   const evidence = await loadInterviewEvidence(resumeId, jobId);
   if (evidence.length) renderDiagnosisUnlocked(evidence);
   else renderDiagnosisLocked('当前简历和岗位没有已完成面试。请先完成八轮项目模拟面试，再查看最终诊断。');
@@ -827,12 +860,12 @@ function renderInterviewEvidenceBlock(report) {
   </section>`;
 }
 function interviewResumeLabel(resumeId) {
-  const resume = state.resumes.find(item => item.id === Number(resumeId));
+  const resume = state.resumes.find(item => Number(item.id) === Number(resumeId));
   return resume ? `${resume.ownerName} · ${resume.targetRole}` : '当前诊断简历';
 }
 function interviewJobLabel(jobId) {
-  const job = state.jobs.find(item => item.id === Number(jobId));
-  return job ? `${job.title} · ${job.company}` : '当前诊断岗位';
+  const job = jobById(jobId);
+  return job ? `${job.title} · ${job.company}` : '请选择目标岗位';
 }
 async function loadInterviewBlueprint(jobId) {
   const id = Number(jobId || 0);
@@ -913,46 +946,273 @@ function populateProjectEvidenceProjects(force=false) {
     return;
   }
   select.innerHTML = projects.map(item => `<option value="${item._evidenceIndex}">${escapeHtml(item.name || `项目 ${item._evidenceIndex + 1}`)}</option>`).join('');
-  select.value = [...select.options].some(option => option.value === previous) ? previous : '0';
+  const resumeId = Number($('#interview-resume')?.value || 0);
+  let preferred = previous;
+  if (!preferred) preferred = localStorage.getItem(`careernav:evidence-project:${resumeId}`) || '';
+  select.value = [...select.options].some(option => option.value === preferred) ? preferred : '0';
   const name = $('#evidence-project-name');
   if (force || !name.value.trim()) fillProjectEvidence(projects[Number(select.value) || 0]);
+}
+const EVIDENCE_DETAIL_SELECTORS = {
+  projectSummary: '#evidence-project-summary',
+  ownedModules: '#evidence-owned-modules',
+  participatedModules: '#evidence-participated-modules',
+  notOwnedModules: '#evidence-not-owned-modules',
+  entryPoint: '#evidence-entry-point',
+  processingChain: '#evidence-processing-chain',
+  dataChange: '#evidence-data-change',
+  responsePath: '#evidence-response-path',
+  coreApi: '#evidence-core-api',
+  apiContract: '#evidence-api-contract',
+  coreTables: '#evidence-core-tables',
+  stateTransitions: '#evidence-state-transitions',
+  keyFieldsRelations: '#evidence-key-fields-relations',
+  indexes: '#evidence-indexes',
+  decisionOneTitle: '#evidence-decision-one-title',
+  decisionOneAlternative: '#evidence-decision-one-alternative',
+  decisionOneTradeoff: '#evidence-decision-one-tradeoff',
+  decisionTwoTitle: '#evidence-decision-two-title',
+  decisionTwoAlternative: '#evidence-decision-two-alternative',
+  decisionTwoTradeoff: '#evidence-decision-two-tradeoff',
+  faultSymptom: '#evidence-fault-symptom',
+  faultDiagnosis: '#evidence-fault-diagnosis',
+  faultFixVerification: '#evidence-fault-fix',
+  testCoverage: '#evidence-test-coverage',
+  evidenceAvailable: '#evidence-available-proof',
+  unmeasuredData: '#evidence-unmeasured',
+  unimplemented: '#evidence-unimplemented',
+  knownLimitations: '#evidence-known-limitations',
+  scalePlan: '#evidence-scale-plan'
+};
+function evidenceDraftKey() {
+  const resumeId = Number($('#interview-resume')?.value || 0);
+  const projectIndex = $('#interview-project-select')?.value || 'manual';
+  return `careernav:evidence-draft:${resumeId}:${projectIndex}`;
+}
+function applyEvidenceDraft(evidence) {
+  if (!evidence || typeof evidence !== 'object') return false;
+  const details = evidence.evidenceDetails || {};
+  const hasEvidence = Boolean(String(evidence.projectName || '').trim())
+    && Object.values(details).some(value => String(value || '').trim().length > 0);
+  if (!hasEvidence) return false;
+  const set = (selector, content) => { const node = $(selector); if (node) node.value = content || ''; };
+  set('#evidence-project-name', evidence.projectName);
+  set('#evidence-role', evidence.role);
+  set('#evidence-team-size', evidence.teamSize);
+  set('#evidence-technical-stack', evidence.techStack);
+  set('#evidence-notes', evidence.notes);
+  const scope = $('#evidence-confidentiality');
+  if (scope && evidence.confidentiality) scope.value = evidence.confidentiality;
+  Object.entries(EVIDENCE_DETAIL_SELECTORS).forEach(([key, selector]) => set(selector, details[key]));
+  updateEvidenceReadiness();
+  return true;
+}
+function saveEvidenceDraft() {
+  const key = evidenceDraftKey();
+  if (!key.endsWith(':0') && !key.endsWith(':manual') && !$('#interview-project-select')?.value) return;
+  try {
+    localStorage.setItem(key, JSON.stringify({ savedAt:new Date().toISOString(), evidence:collectProjectEvidence() }));
+    const status = $('#evidence-draft-status');
+    if (status) status.textContent = `已自动保存 ${new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})}`;
+  } catch (_) {}
+}
+async function restoreEvidenceDraft({ serverFallback=false }={}) {
+  const key = evidenceDraftKey();
+  if (state.evidenceDraftRestoredFor === key) return false;
+  state.evidenceDraftRestoredFor = key;
+  try {
+    const saved = JSON.parse(localStorage.getItem(key) || 'null');
+    if (saved?.evidence && applyEvidenceDraft(saved.evidence)) {
+      const status = $('#evidence-draft-status');
+      if (status) status.textContent = '已恢复自动保存草稿';
+      return true;
+    }
+  } catch (_) {}
+  if (!serverFallback) return false;
+  try {
+    const resumeId = Number($('#interview-resume')?.value || 0);
+    const projectName = $('#interview-project-select')?.selectedOptions[0]?.textContent?.trim()
+      || $('#evidence-project-name')?.value?.trim();
+    if (!resumeId || !projectName) return false;
+    const rows = await api('/api/interviews');
+    const latest = (rows || [])
+      .filter(row => Number(row.resumeId) === resumeId && row.projectEvidence?.projectName === projectName)
+      .sort((a,b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))[0];
+    if (latest?.projectEvidence && applyEvidenceDraft(latest.projectEvidence)) {
+      saveEvidenceDraft();
+      const status = $('#evidence-draft-status');
+      if (status) status.textContent = '已从最近面试恢复';
+      return true;
+    }
+  } catch (_) {}
+  return false;
 }
 function fillProjectEvidence(project) {
   const value = key => project && project[key] ? String(project[key]) : '';
   const set = (selector, content) => { const node = $(selector); if (node) node.value = content || ''; };
+  Object.values(EVIDENCE_DETAIL_SELECTORS).forEach(selector => set(selector, ''));
   set('#evidence-project-name', value('name'));
   set('#evidence-role', value('role'));
   set('#evidence-team-size', '');
-  set('#evidence-business-flow', value('description'));
   set('#evidence-technical-stack', value('techStack'));
-  set('#evidence-implementation', [value('techStack'), value('description')].filter(Boolean).join('；'));
-  set('#evidence-challenge', value('challenge'));
-  set('#evidence-result', value('highlight'));
+  const scope = $('#evidence-confidentiality');
+  if (scope) scope.value = '企业保密项目';
   set('#evidence-notes', '');
+}
+function collectEvidenceDetails() {
+  const read = selector => ($(selector)?.value || '').trim();
+  return Object.fromEntries(Object.entries(EVIDENCE_DETAIL_SELECTORS).map(([key, selector]) => [key, read(selector)]));
 }
 function collectProjectEvidence() {
   const read = selector => ($(selector)?.value || '').trim();
+  const details = collectEvidenceDetails();
+  const reliable = values => values.filter(Boolean).join('；');
   return {
     projectName: read('#evidence-project-name'),
     role: read('#evidence-role'),
     teamSize: read('#evidence-team-size'),
-    businessFlow: read('#evidence-business-flow'),
+    businessFlow: reliable([details.entryPoint, details.processingChain, details.dataChange, details.responsePath]),
     techStack: read('#evidence-technical-stack'),
-    implementation: read('#evidence-implementation'),
-    challenge: read('#evidence-challenge'),
-    resultEvidence: read('#evidence-result'),
+    implementation: details.ownedModules,
+    challenge: reliable([details.faultSymptom, details.faultDiagnosis, details.faultFixVerification]),
+    resultEvidence: reliable([details.testCoverage, details.evidenceAvailable, details.unmeasuredData]),
     confidentiality: read('#evidence-confidentiality') || '企业保密项目',
-    notes: read('#evidence-notes')
+    notes: read('#evidence-notes'),
+    evidenceDetails: details
   };
+}
+const EVIDENCE_FIELD_RULES = {
+  projectName: { label:'项目名称', selector:'#evidence-project-name', min:2 },
+  role: { label:'我的角色', selector:'#evidence-role', min:2 },
+  techStack: { label:'技术栈', selector:'#evidence-technical-stack', min:2 },
+  projectSummary: { label:'一句话项目定位', selector:'#evidence-project-summary', min:8 },
+  ownedModules: { label:'我独立完成', selector:'#evidence-owned-modules', min:10 },
+  notOwnedModules: { label:'明确不是我做的', selector:'#evidence-not-owned-modules', min:4 },
+  entryPoint: { label:'用户入口', selector:'#evidence-entry-point', min:4 },
+  processingChain: { label:'请求处理', selector:'#evidence-processing-chain', min:10 },
+  dataChange: { label:'数据变化', selector:'#evidence-data-change', min:6 },
+  responsePath: { label:'返回结果', selector:'#evidence-response-path', min:4 },
+  coreApi: { label:'核心接口', selector:'#evidence-core-api', min:4 },
+  apiContract: { label:'接口契约', selector:'#evidence-api-contract', min:12 },
+  coreTables: { label:'核心表', selector:'#evidence-core-tables', min:4 },
+  stateTransitions: { label:'关键状态', selector:'#evidence-state-transitions', min:4 },
+  keyFieldsRelations: { label:'关键字段与关系', selector:'#evidence-key-fields-relations', min:8 },
+  decisionOneTitle: { label:'技术决策1方案', selector:'#evidence-decision-one-title', min:4 },
+  decisionOneAlternative: { label:'技术决策1替代方案', selector:'#evidence-decision-one-alternative', min:3 },
+  decisionOneTradeoff: { label:'技术决策1原因与副作用', selector:'#evidence-decision-one-tradeoff', min:8 },
+  decisionTwoTitle: { label:'技术决策2方案', selector:'#evidence-decision-two-title', min:4 },
+  decisionTwoAlternative: { label:'技术决策2替代方案', selector:'#evidence-decision-two-alternative', min:3 },
+  decisionTwoTradeoff: { label:'技术决策2原因与副作用', selector:'#evidence-decision-two-tradeoff', min:8 },
+  faultSymptom: { label:'故障现象与影响', selector:'#evidence-fault-symptom', min:6 },
+  faultDiagnosis: { label:'定位过程与根因', selector:'#evidence-fault-diagnosis', min:8 },
+  faultFixVerification: { label:'修复与回归验证', selector:'#evidence-fault-fix', min:8 },
+  testCoverage: { label:'测试范围', selector:'#evidence-test-coverage', min:6 },
+  evidenceAvailable: { label:'可提供的证据', selector:'#evidence-available-proof', min:3 },
+  unmeasuredData: { label:'未统计或无法证明的数据', selector:'#evidence-unmeasured', min:2 },
+  unimplemented: { label:'没有实现', selector:'#evidence-unimplemented', min:4 },
+  knownLimitations: { label:'已知问题', selector:'#evidence-known-limitations', min:6 },
+  scalePlan: { label:'规模扩大后的调整', selector:'#evidence-scale-plan', min:8 }
+};
+const EVIDENCE_MODULES = [
+  { key:'profile', label:'项目定位与规模', fields:['projectName','role','techStack','projectSummary'] },
+  { key:'ownership', label:'个人责任地图', fields:['ownedModules','notOwnedModules'] },
+  { key:'flow', label:'端到端调用链', fields:['entryPoint','processingChain','dataChange','responsePath'] },
+  { key:'api', label:'核心接口', fields:['coreApi','apiContract'] },
+  { key:'dataModel', label:'核心数据模型', fields:['coreTables','stateTransitions','keyFieldsRelations'] },
+  { key:'decisions', label:'关键技术决策', fields:['decisionOneTitle','decisionOneAlternative','decisionOneTradeoff','decisionTwoTitle','decisionTwoAlternative','decisionTwoTradeoff'] },
+  { key:'failure', label:'故障与修复档案', fields:['faultSymptom','faultDiagnosis','faultFixVerification'] },
+  { key:'results', label:'结果、证据与未统计项', fields:['testCoverage','evidenceAvailable','unmeasuredData'] },
+  { key:'boundary', label:'能力边界与扩展方案', fields:['unimplemented','knownLimitations','scalePlan'] }
+];
+function evidenceDetailValue(evidence, key) {
+  return String(evidence?.evidenceDetails?.[key] || evidence?.[key] || '').trim();
+}
+function validateProjectEvidence(evidence={}, resumeId=0, jobId=0) {
+  const missing = [];
+  if (!resumeId) missing.push({ label:'选择简历', selector:'#interview-resume' });
+  if (!jobId) missing.push({ label:'目标岗位', selector:'#interview-job' });
+  let completedModules = 0;
+  for (const module of EVIDENCE_MODULES) {
+    const missingFields = module.fields.filter(key => {
+      const rule = EVIDENCE_FIELD_RULES[key];
+      return rule && evidenceDetailValue(evidence, key).length < rule.min;
+    });
+    if (missingFields.length) {
+      missing.push({ label:module.label, selector:EVIDENCE_FIELD_RULES[missingFields[0]]?.selector || '' });
+    } else {
+      completedModules += 1;
+    }
+  }
+  const total = EVIDENCE_MODULES.length + 2;
+  return {
+    valid: missing.length === 0,
+    completion: Math.round((total - missing.length) / total * 100),
+    completedModules,
+    missing,
+    selector: missing[0]?.selector || ''
+  };
+}
+function updateEvidenceReadiness({ markInvalid=false }={}) {
+  const resumeId = Number($('#interview-resume')?.value || 0);
+  const jobId = Number($('#interview-job')?.value || 0);
+  const evidence = collectProjectEvidence();
+  const validation = validateProjectEvidence(evidence, resumeId, jobId);
+  const percent = $('#evidence-completion');
+  const bar = $('#evidence-progress-bar');
+  const stateLabel = $('#evidence-gate-state');
+  const readiness = $('#evidence-readiness');
+  const message = $('#evidence-gate-message');
+  const button = $('#start-interview');
+  if (percent) percent.textContent = `${validation.completion}%`;
+  if (bar) bar.style.width = `${validation.completion}%`;
+  if (stateLabel) stateLabel.textContent = validation.valid ? '可以开始' : `${validation.completedModules}/9 模块`;
+  if (readiness) readiness.classList.toggle('ready', validation.valid);
+  if (message) {
+    message.textContent = validation.valid
+      ? '9 个项目证据模块已完成，可以开始八轮项目面试'
+      : `还需完成：${validation.missing.slice(0,3).map(item => item.label).join('、')}${validation.missing.length > 3 ? `等 ${validation.missing.length} 项` : ''}`;
+  }
+  if (button) {
+    button.disabled = !validation.valid;
+    button.innerHTML = validation.valid
+      ? '确认证据卡，开始八轮面试 <span>→</span>'
+      : '完成 9 个证据模块后开始面试';
+  }
+  $$('[data-evidence-field]').forEach(node => {
+    const rule = EVIDENCE_FIELD_RULES[node.dataset.evidenceField];
+    const wrapper = node.closest('.evidence-field');
+    if (!rule || !wrapper) return;
+    const complete = String(node.value || '').trim().length >= rule.min;
+    wrapper.classList.toggle('is-complete', complete);
+    wrapper.classList.toggle('is-invalid', markInvalid ? !complete : node.dataset.touched === 'true' && !complete);
+    if (markInvalid && !complete) node.dataset.touched = 'true';
+  });
+  $$('[data-evidence-module]').forEach(moduleNode => {
+    const module = EVIDENCE_MODULES.find(item => item.key === moduleNode.dataset.evidenceModule);
+    if (!module) return;
+    const complete = module.fields.every(key => {
+      const rule = EVIDENCE_FIELD_RULES[key];
+      return !rule || evidenceDetailValue(evidence, key).length >= rule.min;
+    });
+    moduleNode.classList.toggle('complete', complete);
+    moduleNode.classList.toggle('incomplete', markInvalid && !complete);
+    const status = $(`[data-evidence-module-status="${module.key}"]`);
+    if (status) status.textContent = complete ? '已完成' : '待完善';
+  });
+  return validation;
 }
 function projectEvidenceSummary(session) {
   const evidence = session.projectEvidence || {};
+  const details = evidence.evidenceDetails || {};
   const fields = [
     ['项目', evidence.projectName], ['角色', evidence.role], ['团队', evidence.teamSize],
+    ['责任边界', details.ownedModules ? '已描述' : ''],
+    ['核心接口', details.coreApi], ['数据模型', details.coreTables],
+    ['技术决策', details.decisionOneTitle], ['证据状态', details.evidenceAvailable],
     ['信息范围', evidence.confidentiality]
   ].filter(item => item[1]);
   if (!fields.length) return '';
-  return `<div class="chat-project-evidence"><div><span class="eyebrow">DE-IDENTIFIED PROJECT EVIDENCE</span><b>本场项目证据卡</b><small>无需源码 / ZIP</small></div><div class="chat-project-evidence-grid">${fields.map(item => `<span><b>${escapeHtml(item[0])}</b>${escapeHtml(item[1])}</span>`).join('')}</div></div>`;
+  return `<div class="chat-project-evidence"><div><span class="eyebrow">STRUCTURED PROJECT EVIDENCE</span><b>本场项目证据卡 · 9 个模块</b><small>无需源码 / ZIP</small></div><div class="chat-project-evidence-grid">${fields.map(item => `<span><b>${escapeHtml(item[0])}</b>${escapeHtml(compactText(item[1], 70))}</span>`).join('')}</div></div>`;
 }
 function projectInterviewDebrief(session) {
   const answers = (session.messages || []).filter(message => message.role === 'user');
@@ -1983,11 +2243,41 @@ function markProjectQuestion(id, status) {
 
 /* standalone interview workspace */
 async function startInterview(jobId) {
+  if (jobId) {
+    const requestedJob = Number(jobId);
+    let requested = jobById(requestedJob);
+    if (!requested) {
+      try { requested = await api(`/api/jobs/${requestedJob}`); } catch (error) { requested = null; }
+    }
+    if (requested) {
+      state.activeJobId = requestedJob;
+      if (!state.jobs.some(item => Number(item.id) === requestedJob)) state.jobs.unshift(requested);
+    }
+  }
+  if (state.activeJobId) populateAllSelects();
   const resumeId = Number($('#interview-resume').value || state.activeResumeId);
-  const selectedJob = Number(jobId || $('#interview-job').value || 0);
-  if (!resumeId) { toast('无法开始','请先选择简历',true); return; }
-  if (!selectedJob) { toast('请选择目标岗位','不选择岗位不能开始模拟面试',true); return; }
+  const selectedJob = Number(jobId || $('#interview-job').value || state.activeJobId || 0);
+  if (selectedJob && [...$('#interview-job').options].some(option => option.value === String(selectedJob))) {
+    $('#interview-job').value = String(selectedJob);
+  }
+  $('#interview-job-label').textContent = selectedJob ? interviewJobLabel(selectedJob) : '请选择目标岗位';
+  navigate('interview');
+  const projectEvidence = collectProjectEvidence();
+  const validation = validateProjectEvidence(projectEvidence, resumeId, selectedJob);
+  updateEvidenceReadiness({ markInvalid:true });
+  if (!validation.valid) {
+    toast('请先完成脱敏项目证据卡', `还需补充：${validation.missing.map(item => item.label).join('、')}`, true);
+    const target = validation.selector ? $(validation.selector) : $('#project-evidence-gate');
+    target?.scrollIntoView({ behavior:'smooth', block:'center' });
+    target?.focus?.();
+    return;
+  }
   resetInterviewWorkspace('正在创建面试');
+  const stage = $('#interview-stage-shell');
+  if (stage) {
+    stage.hidden = false;
+    setTimeout(() => stage.scrollIntoView({ behavior:'smooth', block:'start' }), 40);
+  }
   navigate('interview');
   $('#interview-status').textContent = '正在创建面试';
   $('#interview-status').className = 'session-status live';
@@ -1995,11 +2285,10 @@ async function startInterview(jobId) {
   $('#interview-job-label').textContent = interviewJobLabel(selectedJob);
   renderInterviewJobFocus(selectedJob);
   $('#chat-job-title').textContent = interviewJobLabel(selectedJob);
-  $('#chat-messages').innerHTML = '<div class="loading-card"><i></i>Agent 正在读取岗位技能与简历项目，准备第一轮基础概念题...</div>';
+  $('#chat-messages').innerHTML = '<div class="loading-card"><i></i>Agent 正在读取岗位技能、脱敏证据卡和简历项目，准备第一轮职责边界题...</div>';
   try {
     state.activeResumeId = resumeId; state.activeJobId = selectedJob;
     $('#interview-resume').value = resumeId; $('#interview-job').value = selectedJob;
-    const projectEvidence = collectProjectEvidence();
     state.interview = await post('/api/interviews', { resumeId, jobId:selectedJob, difficulty:state.difficulty, projectEvidence });
     renderInterview(state.interview);
     toast('项目面试已开始','八轮追问将覆盖职责、链路、实现、故障、取舍和结果');
@@ -2011,7 +2300,12 @@ async function restoreLatestInterview() {
   if (!resumeId) return;
   try {
     const rows = await api('/api/interviews');
-    const latest = (rows || []).find(item => Number(item.resumeId) === resumeId && ['IN_PROGRESS', 'COMPLETED'].includes(item.status));
+    const forResume = (rows || []).filter(item => Number(item.resumeId) === resumeId && ['IN_PROGRESS', 'COMPLETED'].includes(item.status));
+    const completed = forResume.filter(item => item.status === 'COMPLETED')
+      .sort((a,b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+    const active = forResume.filter(item => item.status === 'IN_PROGRESS')
+      .sort((a,b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+    const latest = completed[0] || active[0];
     if (!latest) return;
     state.interview = latest;
     state.activeResumeId = Number(latest.resumeId);
@@ -2022,15 +2316,18 @@ async function restoreLatestInterview() {
     if ($('#interview-job') && [...$('#interview-job').options].some(option => option.value === String(latest.jobId))) {
       $('#interview-job').value = String(latest.jobId);
     }
-    renderInterview(latest);
+    renderInterview(latest, { revealStage: latest.status === 'COMPLETED' });
+    updateEvidenceReadiness();
     toast('已恢复最近面试', latest.status === 'COMPLETED' ? '完整八轮记录和项目复盘已加载' : `从第 ${latest.currentRound} 轮继续`);
   } catch (error) {
     // Session restore is best-effort; starting a new interview remains available.
   }
 }
-function renderInterview(session) {
+function renderInterview(session, { revealStage=true }={}) {
   if (!session) return;
   state.interview = session;
+  const stage = $('#interview-stage-shell');
+  if (stage) stage.hidden = !revealStage;
   $('#interview-status').textContent = session.status === 'COMPLETED' ? '面试已完成' : `第 ${session.currentRound} 轮进行中`;
   $('#interview-status').className = `session-status ${session.status === 'COMPLETED' ? 'done' : 'live'}`;
   $('#chat-job-title').textContent = session.jobTitle;
@@ -2400,15 +2697,28 @@ $('#interview-difficulty').addEventListener('click', event => {
   state.difficulty = button.dataset.value;
   $$('#interview-difficulty button').forEach(item => item.classList.toggle('active', item === button));
 });
+$('#project-evidence-gate').addEventListener('input', event => {
+  if (event.target.matches('[data-evidence-field]')) event.target.dataset.touched = 'true';
+  updateEvidenceReadiness();
+  saveEvidenceDraft();
+});
+$('#project-evidence-gate').addEventListener('change', () => { updateEvidenceReadiness(); saveEvidenceDraft(); });
 $('#interview-resume').addEventListener('change', event => {
   state.activeResumeId = Number(event.target.value);
   $('#interview-resume-label').textContent = interviewResumeLabel(state.activeResumeId);
   populateProjectEvidenceProjects(true);
+  state.evidenceDraftRestoredFor = '';
+  void restoreEvidenceDraft({ serverFallback:true });
   resetInterviewWorkspace('简历已切换');
 });
 $('#interview-project-select').addEventListener('change', event => {
   const resume = evidenceResume();
   fillProjectEvidence((resume?.projects || [])[Number(event.target.value || 0)] || null);
+  const resumeId = Number($('#interview-resume')?.value || 0);
+  if (resumeId) localStorage.setItem(`careernav:evidence-project:${resumeId}`, String(event.target.value || 0));
+  state.evidenceDraftRestoredFor = '';
+  void restoreEvidenceDraft({ serverFallback:true });
+  updateEvidenceReadiness();
 });
 $('#interview-job').addEventListener('change', event => {
   state.activeJobId = Number(event.target.value) || null;

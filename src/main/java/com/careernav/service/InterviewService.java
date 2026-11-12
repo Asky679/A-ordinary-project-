@@ -333,7 +333,10 @@ public class InterviewService {
                 preferred(supplied == null ? null : supplied.challenge(), fallbackChallenge),
                 preferred(supplied == null ? null : supplied.resultEvidence(), fallbackResult),
                 preferred(supplied == null ? null : supplied.confidentiality(), "企业保密项目"),
-                clip(supplied == null ? "" : safe(supplied.notes()), 1000)
+                clip(supplied == null ? "" : safe(supplied.notes()), 1000),
+                supplied == null || supplied.evidenceDetails() == null
+                        ? Map.of()
+                        : new LinkedHashMap<>(supplied.evidenceDetails())
         );
     }
 

@@ -32,6 +32,26 @@ class ExperiencePatternTests(unittest.TestCase):
         self.assertNotIn("answer", result["items"][0])
         self.assertTrue(all(item.get("sourceFile") for item in result["items"]))
 
+
+    def test_new_real_interview_batch_is_loaded(self):
+        self.assertGreaterEqual(len(EXPERIENCE_PATTERNS), 400)
+        source_files = {item.get("sourceFile") for item in EXPERIENCE_PATTERNS}
+        self.assertIn("实战面试_2年经验_面试官很中意.txt", source_files)
+        self.assertIn("5年Java高级开发_字节社招一面.txt", source_files)
+
+    def test_new_project_and_followup_patterns_are_retrievable(self):
+        set_context("test-new-batch", {
+            "job": {"title": "Java 后端开发", "skills": ["Java", "Spring", "MySQL"]},
+            "resume": {"projects": [{"name": "电商商城", "description": "搜索、秒杀和订单模块"}]},
+            "round": 2,
+        })
+        result = json.loads(search_real_interview_patterns.invoke({
+            "session_id": "test-new-batch", "query": "Solr 搜索索引 商品 秒杀 项目", "stage": "项目实现", "limit": 5,
+        }))
+        self.assertTrue(result["available"])
+        self.assertGreater(result["count"], 0)
+        self.assertTrue(any("搜索" in json.dumps(item, ensure_ascii=False) or "项目" in json.dumps(item, ensure_ascii=False) for item in result["items"]))
+
     def test_project_follow_up_patterns(self):
         set_context("test-project", {
             "job": {"title": "Java 后端开发", "skills": ["Java", "Spring Boot", "MySQL"]},

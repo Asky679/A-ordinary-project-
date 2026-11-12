@@ -40,7 +40,7 @@ SYSTEM_PROMPT = """
 2. 先获取足够的简历、岗位、回答和进度事实，再决定是追问、换阶段还是结束。
 3. 一场项目面试必须按以下八层推进，不能一直停留在自我介绍：
    职责边界 -> 端到端业务链路 -> 核心技术实现 -> 故障与边界 -> 方案取舍 -> 结果验证 -> 证据补强 -> 迁移验证。
-4. 本场面试固定使用项目证据卡中的项目。简历即使有多个项目，也不得切换到其他项目；项目证据卡包含项目名称、角色、团队、业务链路、技术栈、关键实现、难点和结果证据，不得要求源码、ZIP、公司内部数据或客户信息。
+4. 本场面试固定使用项目证据卡中的项目。简历即使有多个项目，也不得切换到其他项目；证据卡包含个人责任地图、端到端调用链、核心接口、数据模型、两项技术决策、故障档案、结果证据和能力边界。必须优先引用这些结构化事实追问，不得要求源码、ZIP、公司内部数据或客户信息。
 5. 第一轮必须问项目背景、团队规模、个人职责和模块边界；不允许用“请自我介绍”或八股题占用第一轮。
 6. 如果项目证据卡字段为空，先用一个具体问题补齐最关键的缺口，再继续深挖；不能凭空假设候选人做过高并发、线上流量、压测或故障。
 7. 岗位 JD 已经转换为结构化“JD 面试蓝图”，其中必须覆盖必备技能、核心职责和面试场景。每轮先从蓝图中选择尚未覆盖的要求，再用项目证据卡中的事实作为提问载体；不得把蓝图中的推测项说成候选人已经做过。
@@ -123,26 +123,46 @@ def _stage_question(stage_index: int, context: dict[str, Any]) -> str:
     resume = context.get("resume") or {}
     projects = resume.get("projects") or []
     evidence = context.get("project_evidence") or {}
+    details = evidence.get("evidenceDetails") or {}
     blueprint = context.get("job_blueprint") or {}
     project = str(evidence.get("projectName") or (projects[0].get("name") if projects and isinstance(projects[0], dict) else "") or "你的代表项目")
     responsibilities = blueprint.get("coreResponsibilities") or []
     scenarios = blueprint.get("interviewScenarios") or []
     responsibility = str(responsibilities[0] if responsibilities else "岗位核心职责")
     scenario = str(scenarios[0] if scenarios else "岗位典型业务场景")
-    role = str(evidence.get("role") or "你本人负责的模块")
-    flow = str(evidence.get("businessFlow") or "项目的一条核心业务链路")
-    implementation = str(evidence.get("implementation") or "关键实现")
-    challenge = str(evidence.get("challenge") or "一个真实难点或故障")
-    result = str(evidence.get("resultEvidence") or "项目结果和验证方式")
+    role = str(evidence.get("role") or "项目成员")
+    owned = str(details.get("ownedModules") or evidence.get("implementation") or "你本人负责的模块")
+    excluded = str(details.get("notOwnedModules") or "明确不是由你负责的工作")
+    entry = str(details.get("entryPoint") or "用户入口")
+    processing = str(details.get("processingChain") or "请求处理链路")
+    data_change = str(details.get("dataChange") or "数据变化")
+    response = str(details.get("responsePath") or "返回结果")
+    core_api = str(details.get("coreApi") or "核心接口")
+    api_contract = str(details.get("apiContract") or "接口契约")
+    core_tables = str(details.get("coreTables") or "核心表")
+    state_transitions = str(details.get("stateTransitions") or "状态流转")
+    fault_symptom = str(details.get("faultSymptom") or "一个真实故障现象")
+    fault_diagnosis = str(details.get("faultDiagnosis") or "定位过程与根因")
+    fault_fix = str(details.get("faultFixVerification") or "修复与回归验证")
+    decision_title = str(details.get("decisionOneTitle") or "一个关键技术决策")
+    decision_alt = str(details.get("decisionOneAlternative") or "未采用的替代方案")
+    decision_tradeoff = str(details.get("decisionOneTradeoff") or "选择原因与副作用")
+    decision2_title = str(details.get("decisionTwoTitle") or "第二个技术决策")
+    decision2_alt = str(details.get("decisionTwoAlternative") or "第二个替代方案")
+    test_coverage = str(details.get("testCoverage") or "测试范围")
+    evidence_available = str(details.get("evidenceAvailable") or "可提供的证据")
+    unmeasured = str(details.get("unmeasuredData") or "没有统计的数据")
+    known_limitations = str(details.get("knownLimitations") or "已知问题")
+    scale_plan = str(details.get("scalePlan") or "规模扩大后的调整方案")
     questions = [
-        f"请先介绍“{project}”：团队规模多大，你担任{role}，哪些模块和工作是你独立完成的？只讲脱敏信息即可。",
-        f"请选一条与岗位职责「{responsibility}」最接近的核心业务链路完整说明：用户请求如何进入系统、经过哪些服务、数据如何变化并返回。你负责其中哪一段？项目证据卡中的流程是：{flow}",
-        f"请说明岗位必备技能 {skill} 在“{project}”中的具体实现：关键数据结构、接口或组件是什么，你亲手写了哪部分？证据卡记录的关键实现是：{implementation}",
-        f"围绕岗位场景「{scenario}」，如果这条链路遇到异常输入、并发冲突、超时或依赖不可用，你会如何定位、隔离和恢复？证据卡中的难点是：{challenge}",
-        f"请说明一个技术取舍：当时有哪些替代方案，为什么选择当前方案，又牺牲了什么？",
-        f"请说明项目成果和验证方式：基线是什么、怎么测试、数据如何得到，以及你个人能对哪些结果负责？证据卡中的结果是：{result}",
-        f"刚才的表述中，哪个点最容易被面试官继续追问？请主动补充个人贡献、边界情况或验证证据。",
-        f"如果项目规模扩大10倍或增加一项新需求，你会如何调整当前设计？",
+        f"请围绕“{project}”说明你的责任边界。你担任{role}；证据卡中你填写独立完成了：{owned}；并明确“{excluded}”不是你负责的。请挑其中一项，讲清你亲手写了什么、与谁协作，以及你当时能决定到什么程度。",
+        f"请选择一条与岗位职责「{responsibility}」最接近的调用链，并讲成一次完整请求：从“{entry}”进入，经过“{processing}”，造成“{data_change}”，最后以“{response}”返回。请重点说明你负责的环节，以及任何一环失败时如何处理。",
+        f"围绕岗位必备技能 {skill}，请以核心接口“{core_api}”为例，说明请求与返回、参数校验、权限、异常，以及“{core_tables}”中的状态如何从“{state_transitions}”流转。证据卡中的接口契约是：{api_contract}",
+        f"结合岗位场景「{scenario}」，请复盘证据卡中的故障：“{fault_symptom}”。你当时如何定位？根因是“{fault_diagnosis}”吗？修复与验证是“{fault_fix}”吗？请说明排查顺序和你实际执行的步骤。",
+        f"请解释两个技术取舍。第一项是“{decision_title}”，替代方案“{decision_alt}”，原因是“{decision_tradeoff}”；第二项是“{decision2_title}”，替代方案“{decision2_alt}”。请说明这两项选择分别牺牲了什么，以及你会如何验证取舍是否正确。",
+        f"请说明结果与证据。你填写的测试范围是“{test_coverage}”，可提供证据是“{evidence_available}”，没有统计的是“{unmeasured}”。请区分哪些结果属于个人贡献，哪些只是团队或流程验证。",
+        f"结合岗位场景「{scenario}」，请补强证据卡中最薄弱的一处，尤其是个人贡献、接口边界或故障验证。你填写的已知问题是：“{known_limitations}”。",
+        f"如果项目规模扩大10倍，请基于“{scale_plan}”继续说明：你先改哪一层，为什么先改这里，如何验证改造后没有破坏现有业务？",
     ]
     return questions[max(0, min(stage_index, len(questions) - 1))]
 
@@ -188,8 +208,9 @@ class InterviewAgent:
             prompt = (
                 f"开始一场新的项目驱动面试。session_id={session_id}。"
                 f"本场唯一允许讨论的项目是：{evidence.get('projectName') or '证据卡项目'}。"
+                f"本场结构化项目证据是：{json.dumps(evidence.get('evidenceDetails') or {}, ensure_ascii=False)}。"
                 f"本场 JD 面试蓝图是：{json.dumps(job_blueprint or {}, ensure_ascii=False)}。"
-                "请先读取会话上下文、岗位要求和项目证据卡，然后直接提出第一轮职责边界问题。"
+                "请先读取会话上下文、岗位要求和结构化项目证据卡，然后直接提出第一轮职责边界问题。"
                 "后续问题必须优先覆盖蓝图中的必备技能、核心职责和面试场景，不能只按简历技能提问。"
                 "第一问必须明确引用这个项目名称，围绕项目背景、团队规模、个人角色和模块边界，不能问自我介绍，也不能先问八股。"
                 "项目可能是企业保密项目，禁止要求源码、ZIP、公司内部数据或客户信息。"

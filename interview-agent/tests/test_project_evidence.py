@@ -67,6 +67,34 @@ class ProjectEvidenceQuestionTests(unittest.TestCase):
                 "implementation": "订单服务和幂等处理",
                 "challenge": "支付回调重复",
                 "resultEvidence": "响应时间降低30%",
+                "evidenceDetails": {
+                    "ownedModules": "独立实现订单创建接口和幂等处理",
+                    "notOwnedModules": "支付渠道接入不是我负责",
+                    "entryPoint": "点击提交订单",
+                    "processingChain": "JWT Filter → OrderController → OrderService → MySQL 事务",
+                    "dataChange": "写入 order 表并扣减库存",
+                    "responsePath": "返回订单号和状态",
+                    "coreApi": "POST /orders 创建订单",
+                    "apiContract": "校验库存、登录权限和重复请求",
+                    "coreTables": "order、order_item、product",
+                    "stateTransitions": "CREATED → PAID → CANCELLED",
+                    "keyFieldsRelations": "order 一对多 order_item",
+                    "decisionOneTitle": "订单创建使用事务",
+                    "decisionOneAlternative": "先扣库存再异步建单",
+                    "decisionOneTradeoff": "保证一致性但事务更长",
+                    "decisionTwoTitle": "使用幂等键",
+                    "decisionTwoAlternative": "只依赖前端防重复点击",
+                    "decisionTwoTradeoff": "增加存储成本但可阻止重复提交",
+                    "faultSymptom": "重复请求生成两笔订单",
+                    "faultDiagnosis": "接口没有幂等控制",
+                    "faultFixVerification": "增加唯一约束并完成重复请求回归",
+                    "testCoverage": "正常下单、库存不足、重复提交",
+                    "evidenceAvailable": "接口截图和测试记录",
+                    "unmeasuredData": "没有线上并发数据",
+                    "unimplemented": "没有支付和退款",
+                    "knownLimitations": "缓存一致性只做删除缓存",
+                    "scalePlan": "订单分表并引入消息队列",
+                },
             },
         }
         questions = [_stage_question(index, context) for index in range(8)]
@@ -74,10 +102,14 @@ class ProjectEvidenceQuestionTests(unittest.TestCase):
         self.assertEqual(len(set(questions)), 8)
         self.assertIn("企业订单系统", questions[0])
         self.assertIn("后端开发", questions[0])
-        self.assertIn("下单到支付", questions[1])
-        self.assertIn("订单服务和幂等处理", questions[2])
-        self.assertIn("支付回调重复", questions[3])
-        self.assertIn("响应时间降低30%", questions[5])
+        self.assertIn("点击提交订单", questions[1])
+        self.assertIn("独立实现订单创建接口", questions[0])
+        self.assertIn("JWT Filter", questions[1])
+        self.assertIn("POST /orders", questions[2])
+        self.assertIn("重复请求生成两笔订单", questions[3])
+        self.assertIn("订单创建使用事务", questions[4])
+        self.assertIn("接口截图和测试记录", questions[5])
+        self.assertIn("缓存一致性", questions[6])
         self.assertIn("10倍", questions[7])
 
 
