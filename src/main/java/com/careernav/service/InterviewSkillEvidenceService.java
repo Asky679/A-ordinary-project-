@@ -65,13 +65,13 @@ public class InterviewSkillEvidenceService {
     @Transactional(readOnly = true)
     public List<InterviewSkillEvidence> latestForResume(Long resumeId) {
         if (resumeId == null) return List.of();
-        return mergeLatest(repository.findByResumeIdAndStatusOrderByUpdatedAtDesc(resumeId, "COMPLETED"));
+        return mergeLatest(repository.findByResumeIdAndStatusAndDeletedAtIsNullOrderByUpdatedAtDesc(resumeId, "COMPLETED"));
     }
 
     @Transactional(readOnly = true)
     public List<InterviewSkillEvidence> latestForResumeAndJob(Long resumeId, Long jobId) {
         if (resumeId == null) return List.of();
-        List<InterviewSessionEntity> sessions = repository.findByResumeIdAndStatusOrderByUpdatedAtDesc(resumeId, "COMPLETED");
+        List<InterviewSessionEntity> sessions = repository.findByResumeIdAndStatusAndDeletedAtIsNullOrderByUpdatedAtDesc(resumeId, "COMPLETED");
         if (jobId != null) sessions = sessions.stream().filter(item -> jobId.equals(item.getJobId())).toList();
         return mergeLatest(sessions);
     }

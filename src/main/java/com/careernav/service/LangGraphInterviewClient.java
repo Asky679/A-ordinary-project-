@@ -1,5 +1,6 @@
 package com.careernav.service;
 
+import com.careernav.domain.ApiModels.CandidateStoryView;
 import com.careernav.domain.ApiModels.InterviewProjectEvidence;
 import com.careernav.domain.ApiModels.JobInterviewBlueprint;
 import com.careernav.domain.ApiModels.JobView;
@@ -56,7 +57,8 @@ public class LangGraphInterviewClient {
     }
 
     public AgentTurn start(Long sessionId, ResumeView resume, JobView job, String difficulty,
-                            InterviewProjectEvidence projectEvidence, JobInterviewBlueprint jobBlueprint) {
+                            String interviewMode, InterviewProjectEvidence projectEvidence,
+                            JobInterviewBlueprint jobBlueprint, List<CandidateStoryView> storyBank) {
         if (!enabled) return null;
         try {
             Map<String, Object> body = new LinkedHashMap<>();
@@ -64,8 +66,10 @@ public class LangGraphInterviewClient {
             body.put("resume", resumeContext(resume));
             body.put("job", jobContext(job));
             body.put("difficulty", difficulty);
+            body.put("interviewMode", interviewMode);
             body.put("projectEvidence", projectEvidence);
             body.put("jobBlueprint", jobBlueprint);
+            body.put("storyBank", storyBank == null ? List.of() : storyBank);
             return parse(post("/v1/interviews/start", body));
         } catch (Exception exception) {
             log.warn("LangGraph start failed: {}", exception.getMessage());
@@ -74,11 +78,13 @@ public class LangGraphInterviewClient {
     }
 
     public AgentTurn answer(Long sessionId, String answer, ResumeView resume, JobView job,
-                            InterviewProjectEvidence projectEvidence, JobInterviewBlueprint jobBlueprint) {
+                            String interviewMode, InterviewProjectEvidence projectEvidence,
+                            JobInterviewBlueprint jobBlueprint) {
         if (!enabled) return null;
         try {
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("answer", answer);
+            body.put("interviewMode", interviewMode);
             body.put("resume", resumeContext(resume));
             body.put("job", jobContext(job));
             body.put("projectEvidence", projectEvidence);

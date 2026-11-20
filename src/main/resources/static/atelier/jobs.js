@@ -2,6 +2,7 @@ import { request, params } from './api.js';
 import { $, $$, esc, chips, options, link, empty, error, showDialog, external, task } from './ui.js';
 import { getJobSector } from './job-sectors.js';
 import { postingPath, starPath, starTexture } from './job-sky-layout.js';
+import { careerMap } from './career-map.js';
 
 function sectorHeader(id, sector, selected){
   const path = 'jobs?work=1&sector='+encodeURIComponent(id);
@@ -34,12 +35,18 @@ export function jobs(root, signal, query){
   root.classList.toggle('sector-work',Boolean(sector));
   root.innerHTML = `
   ${sector ? sectorHeader(sectorId,sector,role) : ''}
+  ${sector ? '' : '<section id="career-map"></section>'}
   <div class="workspace">
-    <form class="panel search" id="job-search" aria-label="筛选招聘岗位">
-      <label>搜索岗位<input type="search" name="keyword" placeholder="岗位、公司或技能"></label>
+    <form class="panel search" id="job-search" data-mode="match" aria-label="筛选招聘岗位">
+      <div class="search-mode-switch" role="group" aria-label="选择岗位筛选方式">
+        <button type="button" class="search-mode-option" data-search-mode="match"><span>按简历智能匹配</span><small>根据技能、方向、经验和城市推荐岗位</small></button>
+        <button type="button" class="search-mode-option" data-search-mode="browse"><span>自由搜索岗位</span><small>按关键词、城市或职业方向查找</small></button>
+      </div>
+      <p class="search-mode-help" id="search-mode-help"><strong>先选择一份简历</strong>，系统会计算岗位适配度并优先显示更匹配的机会。</p>
+      <label class="browse-only">搜索岗位<input type="search" name="keyword" placeholder="岗位、公司或技能"></label>
       <label>城市<select name="city"><option value="">所有城市</option></select></label>
-      <label>按简历匹配<select name="resumeId"><option value="">浏览全部岗位</option></select></label>
-      <div class="job-search-actions"><button class="button primary" type="submit">搜索</button><button class="quiet" type="button" id="refresh-jobs">同步岗位源</button></div>
+      <label class="match-only search-resume-strong">选择用于匹配的简历<select name="resumeId"><option value="">选择简历</option></select></label>
+      <div class="job-search-actions"><button class="button primary" id="job-search-submit" type="submit">开始智能匹配</button><button class="quiet" type="button" id="refresh-jobs">同步岗位源</button></div>
       <details class="disclosure search-more"><summary>更多筛选</summary><div class="fields">
         <label>学历<select name="education"><option value="">不限</option><option>大专</option><option>本科</option><option>硕士</option><option>博士</option></select></label>
         <label>经验<select name="experience"><option value="">不限</option><option>经验不限</option><option>1-3年</option><option>3-5年</option><option>5-10年</option></select></label>
@@ -52,7 +59,7 @@ export function jobs(root, signal, query){
         <label>排除城市（简历匹配）<input name="excludedCities" placeholder="使用逗号分隔"></label>
       </div></details>
     </form>
-    <div class="job-tools"><button type="button" class="quiet" id="job-agent">Agent 搜索与推荐</button>
+    <div class="job-tools"><button type="button" class="quiet match-only" id="job-agent">Agent 深度推荐</button>
       <details class="job-weights"><summary>查看岗位匹配权重</summary><div></div></details></div>
     <section id="job-agent-result" aria-live="polite" hidden></section>
     <p id="job-search-status" class="muted" role="status" hidden></p>
@@ -61,11 +68,32 @@ export function jobs(root, signal, query){
   const form=$('#job-search',root), output=$('#job-results',root);
   const searchButton=$('button[type="submit"]',form);
   const refresh=$('#refresh-jobs',form);
+  const modeHelp=$('#search-mode-help',root);
+  let searchMode = query.get('resumeId') ? 'match' : (query.get('q') || query.get('careerRole') ? 'browse' : 'match');
+  let careerRole = query.get('careerRole') || '';
+  let careerRoleName = '';
+  function setSearchMode(mode, execute=false){
+    searchMode = mode === 'browse' ? 'browse' : 'match';
+    form.dataset.mode = searchMode;
+    $$('[data-search-mode]',form).forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.searchMode===searchMode)));
+    form.elements.keyword.disabled = searchMode !== 'browse';
+    form.elements.resumeId.disabled = searchMode !== 'match';
+    searchButton.textContent = searchMode === 'match' ? '开始智能匹配' : '搜索岗位';
+    const agentAction = $('#job-agent',root);
+    if(agentAction) agentAction.hidden = searchMode !== 'match';
+    modeHelp.innerHTML = searchMode === 'match'
+      ? '<strong>先选择一份简历</strong>，系统会计算岗位适配度并优先显示更匹配的机会。'
+      : '<strong>按岗位条件自由查找</strong>，不会叠加简历匹配排序。';
+    if(searchMode === 'match') form.elements.keyword.value = '';
+    else form.elements.resumeId.value = '';
+    if(execute) run(0,true);
+  }
+  $$('[data-search-mode]',form).forEach(button=>button.addEventListener('click',()=>{ careerRole=''; careerRoleName=''; setSearchMode(button.dataset.searchMode,true); },{signal}));
   const filterNames=['city','resumeId','education','experience','salaryMin','excludedCities','category','industry','sort','mode','year'];
   let current;
   let resultList=[];
   let lastQuery;
-  form.elements.keyword.value = query.get('q') ?? role?.keyword ?? '';
+  form.elements.keyword.value = query.get('q') ?? (careerRole ? '' : role?.keyword ?? '');
   searchButton.disabled = refresh.disabled = true;
   output.innerHTML = empty('正在查找岗位');
   signal.addEventListener('abort',()=>current?.abort(),{once:true});
@@ -74,7 +102,8 @@ export function jobs(root, signal, query){
     current?.abort();
     const controller = new AbortController();
     current = controller;
-    const { keyword, city, resumeId, mode, year, ...filters } = Object.fromEntries(new FormData(form));
+    let { keyword, city, resumeId, mode, year, ...filters } = Object.fromEntries(new FormData(form));
+    keyword = keyword || ''; city = city || ''; resumeId = resumeId || '';
     lastQuery={keyword,city,resumeId,mode,year,...filters};
     if (keepQuery) {
       try { localStorage.setItem('careernav-excluded-cities',JSON.stringify(filters.excludedCities.split(/[,，]/).map(city=>city.trim()).filter(Boolean))); } catch {}
@@ -82,7 +111,13 @@ export function jobs(root, signal, query){
     if (keepQuery) {
       const active = new URLSearchParams(location.hash.split('?')[1]);
       active.set('work','1');
-      active.set('q',keyword);
+      if (careerRole) {
+        active.set('careerRole',careerRole);
+        active.delete('q');
+      } else {
+        active.delete('careerRole');
+        active.set('q',keyword);
+      }
       for (const name of filterNames) {
         if (lastQuery[name]) active.set(name,lastQuery[name]);
         else active.delete(name);
@@ -97,7 +132,12 @@ export function jobs(root, signal, query){
     try {
       let matches;
       let total;
-      if(city && resumeId && mode!=='hybrid') {
+      if(careerRole) {
+        const data=await request('/career-map/roles/'+encodeURIComponent(careerRole)+'/jobs?'+params({city,page,size:24}),{signal:controller.signal});
+        matches=(data.items || []).map(job=>({job}));
+        total=data.total;
+        careerRoleName=data.roleName || careerRoleName;
+      } else if(city && resumeId && mode!=='hybrid') {
         const data=await request('/jobs/city?'+params({keyword,city,resumeId,...filters,page,size:24}),{signal:controller.signal});
         matches=data.items || [];
         total=data.total;
@@ -138,7 +178,7 @@ export function jobs(root, signal, query){
 
   function render(total,page){
     const matched = resultList.some(item=>item.matchScore != null);
-    output.innerHTML = `<div class="split results-title"><h2>${matched?'简历匹配':'岗位列表'}</h2>
+    output.innerHTML = `<div class="split results-title"><h2>${careerRole ? esc(careerRoleName || '职业方向')+'岗位' : (matched?'简历匹配':'岗位列表')}</h2>
       <span class="muted">${total==null?`当前 ${resultList.length} 个岗位`:`共 ${esc(total)} 个岗位`}</span>
       ${matched?`<button class="quiet" type="button" id="rerank">Agent 细化分析</button>`:''}</div>`+
       (resultList.length ? `<div class="job-grid">${resultList.map((item,i)=>card(item,i)).join('')}</div>` : empty('没有找到符合条件的岗位','试试其他关键词或清除部分筛选条件。')) +
@@ -182,8 +222,19 @@ export function jobs(root, signal, query){
     }
   }));
   bindWeights($('.job-weights',root),'/jobs/weights/ahp',signal);
+  const careerRoot = $('#career-map',root);
+  if (careerRoot) careerMap(careerRoot,signal,role=>{
+    setSearchMode('browse');
+    careerRole = role.id;
+    careerRoleName = role.name;
+    form.elements.keyword.value = '';
+    form.elements.category.value = '';
+    run(0,true);
+    form.scrollIntoView({block:'start',behavior:'smooth'});
+  });
   form.addEventListener('submit',event=>{
     event.preventDefault();
+    if (careerRole && form.elements.keyword.value.trim()) { careerRole=''; careerRoleName=''; }
     if (!searchButton.disabled) run(0,true);
   });
   refresh.addEventListener('click',task(refresh,async()=>{
@@ -194,6 +245,8 @@ export function jobs(root, signal, query){
     if(signal.aborted)return;
     if(cities.status==='fulfilled') form.elements.city.insertAdjacentHTML('beforeend',cities.value.map(item=>`<option value="${esc(item.city)}">${esc(item.city)} · ${esc(item.count)}</option>`).join(''));
     if(resumes.status==='fulfilled') form.elements.resumeId.insertAdjacentHTML('beforeend',options(resumes.value,'',item=>item.ownerName+' · '+item.targetRole));
+    setSearchMode(searchMode);
+    if(searchMode==='match' && !form.elements.resumeId.value && resumes.status==='fulfilled' && resumes.value.length) form.elements.resumeId.value = String(resumes.value[0].id);
     for (const name of filterNames) {
       let value = query.get(name);
       if (name==='excludedCities' && value===null) {

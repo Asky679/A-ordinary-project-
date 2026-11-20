@@ -17,6 +17,8 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)');
 const views = { home:city, studio, jobs, interview, growth, project, workflow };
 let controller;
 let transition;
+let transitionTimer;
+let transitionStartedAt = 0;
 let motionOff = false;
 try { motionOff = localStorage.getItem('atelier-motion') === 'off'; } catch {}
 
@@ -34,6 +36,40 @@ motion.addEventListener('click',()=>{
 });
 reduced.addEventListener('change',syncMotion);
 syncMotion();
+
+function clearTransitionArtifacts() {
+  clearTimeout(transitionTimer);
+  document.body.removeAttribute('data-share-planet');
+  const html = document.documentElement;
+  delete html.dataset.harborJourney;
+  delete html.dataset.harborDirection;
+  $('[data-journey-mark]',root)?.removeAttribute('data-journey-mark');
+}
+
+function finishTransition(force = false) {
+  const current = transition;
+  transition = null;
+  clearTransitionArtifacts();
+  if (force && current?.skipTransition) {
+    try { current.skipTransition(); } catch {}
+  }
+  return current;
+}
+
+function watchTransition(current) {
+  clearTimeout(transitionTimer);
+  transitionStartedAt = performance.now();
+  transitionTimer = setTimeout(() => {
+    if (transition === current) finishTransition(true);
+  }, 1800);
+}
+
+function recoverStuckMotion({ closeDialog = false } = {}) {
+  finishTransition(true);
+  clearTransitionArtifacts();
+  document.body.classList.remove('modal-open', 'is-busy');
+  if (closeDialog && $('#dialog')?.open) $('#dialog').close();
+}
 
 function routeFromUrl() {
   const hash = location.hash.slice(1).split('?')[0];
@@ -140,11 +176,8 @@ window.addEventListener('hashchange', () => {
   const canAnimate = (journey || (!skyBoot && !roomOpening && (from !== to || changingLayer || changingSky)))
     && document.startViewTransition && !document.body.classList.contains('no-motion')
     && !matchMedia('(prefers-reduced-motion: reduce)').matches;
-  transition?.skipTransition();
+  finishTransition(true);
   const html = document.documentElement;
-  delete html.dataset.harborJourney;
-  delete html.dataset.harborDirection;
-  $('[data-journey-mark]',root)?.removeAttribute('data-journey-mark');
   const restoreLandmark = () => {
     if (returningHarbor) $('.city-landmark[data-destination="'+from+'"]',root)?.focus({preventScroll:true});
   };
@@ -188,16 +221,44 @@ window.addEventListener('hashchange', () => {
     }
   });
   const current = transition;
+  watchTransition(current);
   current.ready.catch(()=>{});
   current.finished.finally(() => {
     if (transition === current) {
       transition = null;
-      document.body.removeAttribute('data-share-planet');
-      delete html.dataset.harborJourney;
-      delete html.dataset.harborDirection;
-      $('[data-journey-mark]',root)?.removeAttribute('data-journey-mark');
+      clearTransitionArtifacts();
     }
-  }).catch(()=>{});
+  }).catch(()=>{
+    if (transition === current) finishTransition(true);
+  });
+});
+
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape') return;
+  const dialog = $('#dialog');
+  if (dialog?.open) {
+    dialog.close();
+    event.preventDefault();
+    return;
+  }
+  if (transition || document.documentElement.hasAttribute('data-harbor-journey')
+      || document.body.hasAttribute('data-share-planet')) {
+    recoverStuckMotion();
+  }
+});
+
+window.addEventListener('pageshow', () => {
+  if (document.documentElement.hasAttribute('data-harbor-journey')
+      || document.body.hasAttribute('data-share-planet')) {
+    requestAnimationFrame(() => recoverStuckMotion());
+  }
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && transition
+      && performance.now() - transitionStartedAt > 1600) {
+    recoverStuckMotion();
+  }
 });
 quickNav.addEventListener('click',event => {
   const destination = event.target.closest('a');

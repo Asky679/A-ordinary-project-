@@ -22,12 +22,16 @@ class StartRequest(BaseModel):
     resume: dict[str, Any] = Field(default_factory=dict)
     job: dict[str, Any] = Field(default_factory=dict)
     difficulty: str = "标准"
+    interviewMode: str = "综合面"
     projectEvidence: dict[str, Any] = Field(default_factory=dict)
     jobBlueprint: dict[str, Any] = Field(default_factory=dict)
+    storyBank: list[dict[str, Any]] = Field(default_factory=list)
+    interviewPlan: list[str] = Field(default_factory=list)
 
 
 class AnswerRequest(BaseModel):
     answer: str
+    interviewMode: str | None = None
     resume: dict[str, Any] | None = None
     job: dict[str, Any] | None = None
     projectEvidence: dict[str, Any] | None = None
@@ -58,14 +62,18 @@ def health() -> dict[str, Any]:
 
 @app.post("/v1/interviews/start")
 def start(request: StartRequest) -> dict[str, Any]:
-    return agent.start(request.sessionId, request.resume, request.job, request.difficulty, request.projectEvidence, request.jobBlueprint)
+    return agent.start(
+        request.sessionId, request.resume, request.job, request.difficulty,
+        request.interviewMode, request.projectEvidence, request.jobBlueprint,
+        request.storyBank, request.interviewPlan or None,
+    )
 
 
 @app.post("/v1/interviews/{session_id}/answer")
 def answer(session_id: str, request: AnswerRequest) -> dict[str, Any]:
     if not request.answer.strip():
         raise HTTPException(status_code=400, detail="answer cannot be empty")
-    if request.resume or request.job or request.projectEvidence or request.jobBlueprint:
+    if request.interviewMode or request.resume or request.job or request.projectEvidence or request.jobBlueprint:
         current = {}
         try:
             from .tools import get_context
@@ -73,6 +81,7 @@ def answer(session_id: str, request: AnswerRequest) -> dict[str, Any]:
         except Exception:
             current = {}
         current.update({
+            "interview_mode": request.interviewMode or current.get("interview_mode") or "综合面",
             "resume": request.resume or current.get("resume") or {},
             "job": request.job or current.get("job") or {},
             "project_evidence": request.projectEvidence or current.get("project_evidence") or {},

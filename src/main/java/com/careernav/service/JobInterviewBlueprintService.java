@@ -74,7 +74,7 @@ public class JobInterviewBlueprintService {
         ModelDraft draft = model.generateJson(prompt, ModelDraft.class);
         if (draft == null) return fallback;
         List<String> mustHave = unique(draft.mustHaveSkills());
-        List<String> responsibilities = unique(draft.coreResponsibilities());
+        List<String> responsibilities = usefulResponsibilities(unique(draft.coreResponsibilities()), fallback.coreResponsibilities());
         List<String> scenarios = unique(draft.interviewScenarios());
         return new JobInterviewBlueprint(
                 job.id(), job.title(), job.company(),
@@ -99,7 +99,8 @@ public class JobInterviewBlueprintService {
             merged.addAll(extractSkills(job.title() + " " + jobText(job)));
             skills = limit(List.copyOf(merged));
         }
-        List<String> responsibilities = sentences(jobText(job), 8);
+        List<String> responsibilities = usefulResponsibilities(sentences(jobText(job), 12),
+                List.of("围绕岗位核心技能完成功能开发和接口交付", "参与需求沟通、联调和问题排查"));
         List<String> scenarios = scenarios(job, skills);
         List<String> constraints = new ArrayList<>();
         if (job.education() != null && !job.education().isBlank()) constraints.add("学历：" + job.education());
@@ -116,6 +117,22 @@ public class JobInterviewBlueprintService {
                 "由岗位库中的 JD、技能、职责、经验和行业数据规则提取");
     }
 
+    private List<String> usefulResponsibilities(List<String> values, List<String> fallback) {
+        List<String> filtered = (values == null ? List.<String>of() : values).stream()
+                .map(this::safe)
+                .filter(value -> !value.isBlank())
+                .filter(value -> !isGenericDuty(value))
+                .limit(MAX_ITEMS)
+                .toList();
+        return filtered.isEmpty() ? limit(fallback) : filtered;
+    }
+
+    private boolean isGenericDuty(String value) {
+        String text = safe(value).toLowerCase(Locale.ROOT);
+        return List.of("完成上级", "领导交办", "领导安排", "服从安排", "其他工作",
+                        "临时工作", "临时任务", "公司安排", "完成领导", "boss直聘")
+                .stream().anyMatch(text::contains);
+    }
     private List<String> extractSkills(String text) {
         String source = safe(text);
         LinkedHashSet<String> result = new LinkedHashSet<>();

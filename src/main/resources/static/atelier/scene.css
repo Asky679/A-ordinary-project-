@@ -506,6 +506,11 @@ html[data-harbor-journey] :is(.cafe-heading,.garden-journal,.project-intro,.refe
 html[data-harbor-journey] :is(.cafe-seats,.job-star-field) { view-transition-name:destination-detail }
 html[data-harbor-direction="out"] .blueprint-grid::after { animation-play-state:paused }
 html[data-harbor-journey]::view-transition { pointer-events:none }
+::view-transition,
+::view-transition-group(*),
+::view-transition-image-pair(*),
+::view-transition-old(*),
+::view-transition-new(*) { pointer-events:none !important }
 html[data-harbor-journey]::view-transition-group(destination-art) { z-index:1 }
 html[data-harbor-journey]::view-transition-group(destination-detail) { z-index:2 }
 html[data-harbor-journey]::view-transition-group(destination-controls),

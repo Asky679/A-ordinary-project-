@@ -7,6 +7,14 @@ from typing import Any
 import requests
 from langchain_core.tools import tool
 
+from .junior_reference import (
+    infer_direction,
+    is_junior_level,
+    junior_question_candidates,
+    junior_reference_payload,
+    score_junior_answer,
+)
+
 CONTEXTS: dict[str, dict[str, Any]] = {}
 
 EXPERIENCE_PATTERNS_PATH = Path(__file__).resolve().parents[1] / "data" / "interview-experiences" / "patterns.jsonl"
@@ -42,6 +50,17 @@ def _retrieval_tokens(text: str) -> set[str]:
     return {token for token in tokens if token.strip()}
 
 
+TECHNICAL_STAGES = {
+    "项目职责", "项目概述", "业务链路", "技术实现", "基础概念", "故障与取舍",
+    "故障与边界", "方案取舍", "结果验证", "技术判断",
+}
+MODE_DESCRIPTIONS = {
+    "综合面": "项目+动机+协作+反思",
+    "技术面": "项目与技术深度",
+    "HR面": "动机+稳定性+沟通+规划",
+    "主管面": "业务判断+协作+结果",
+    "行为面": "协作+冲突+失败+推动改变",
+}
 QUESTION_BANK = {
     "self_intro": [
         "请用两分钟介绍你自己，并重点说明一个和目标岗位最相关的项目。",
@@ -69,11 +88,41 @@ QUESTION_BANK = {
     ],
     "behavior": [
         "请讲一次团队协作中你推动问题解决的经历。",
-        "你遇到过最有挑战的技术问题是什么，你如何学习和解决？",
+        "讲一次你和队友意见不一致的经历，你如何沟通并推进结果？",
+        "讲一次你失败、返工或判断错误的经历，你后来改变了什么做法？",
+        "当多个任务同时压来、时间不够时，你如何安排优先级？",
+    ],
+    "motivation": [
+        "你为什么选择这个岗位方向？未来一年最希望提升什么能力？",
+        "你为什么选择我们公司？你对工作地点、到岗时间和工作安排有什么考虑？",
+    ],
+    "conflict": [
+        "讲一次你的方案被质疑的经历，你如何判断对错并推进？",
+        "如果团队成员不配合你的工作，你会怎么处理？",
+    ],
+    "failure": [
+        "讲一次你失败或返工的经历，根因是什么，后来如何改进？",
+        "你曾经判断错了一件事吗？你从中学到了什么？",
+    ],
+    "career": [
+        "未来两到三年，你希望成为什么方向的工程师？",
+        "你希望第一份工作给你带来哪些成长？",
     ],
     "reverse": ["你有什么问题想反问面试官？"],
 }
-
+BANK_STAGE_ALIASES = {
+    "个人背景": "self_intro",
+    "求职动机": "motivation",
+    "项目职责": "project",
+    "项目概述": "project",
+    "业务链路": "project",
+    "团队协作": "behavior",
+    "冲突处理": "conflict",
+    "失败与学习": "failure",
+    "岗位意愿": "motivation",
+    "职业规划": "career",
+    "候选人反问": "reverse",
+}
 
 def set_context(session_id: str, payload: dict[str, Any]) -> None:
     context = CONTEXTS.setdefault(session_id, {})
@@ -93,6 +142,10 @@ def context_public(session_id: str) -> dict[str, Any]:
         "session_id": session_id,
         "round": context.get("round", 1),
         "difficulty": context.get("difficulty", "标准"),
+        "interview_mode": context.get("interview_mode", "综合面"),
+        "interview_plan": context.get("interview_plan", []),
+        "current_stage": context.get("current_stage", ""),
+        "story_bank": context.get("story_bank", []),
         "resume": context.get("resume", {}),
         "job": context.get("job", {}),
         "memory": context.get("memory", []),
@@ -140,6 +193,20 @@ def _select_stage(session_id: str) -> str:
     if any(term in job_text for term in ("运维", "linux", "docker", "devops", "sre")):
         return "system"
     return "behavior"
+
+
+def _bank_stage_for_context(session_id: str, stage: str) -> str:
+    mapped = BANK_STAGE_ALIASES.get(stage, stage)
+    if mapped in QUESTION_BANK:
+        return mapped
+    if stage in {"项目职责", "项目概述", "业务链路", "结果验证", "技术判断"}:
+        return "project"
+    if stage in {"技术实现", "基础概念", "故障与取舍", "故障与边界", "方案取舍"}:
+        direction_stage = _select_stage(session_id)
+        return direction_stage if direction_stage in {"backend", "python", "system"} else "backend"
+    return "behavior"
+
+
 @tool
 def read_session_context(session_id: str) -> str:
     """读取当前面试会话中的简历、岗位、轮次和历史记忆。"""
@@ -163,8 +230,19 @@ def get_job_requirements(session_id: str) -> str:
 
 @tool
 def search_question_bank(session_id: str, keyword: str, stage: str = "") -> str:
-    """根据关键词和面试阶段检索问题库。"""
-    selected_stage = stage or _select_stage(session_id)
+    """根据等级、关键词和面试阶段检索问题库。"""
+    context = get_context(session_id)
+    raw_stage = stage.strip() if stage else _select_stage(session_id)
+    selected_stage = _bank_stage_for_context(session_id, raw_stage)
+    if is_junior_level(context.get("difficulty")):
+        questions = junior_question_candidates(selected_stage, context, keyword=keyword, limit=6)
+        return json.dumps({
+            "stage": selected_stage,
+            "level": "初级",
+            "direction": infer_direction(context),
+            "questions": questions,
+            "usageNote": "初级问题一次只问一个主要事实；优先问个人实现、输入输出、边界、测试和调试。",
+        }, ensure_ascii=False)
     candidates = list(QUESTION_BANK.get(selected_stage, []))
     candidates.extend(QUESTION_BANK.get("behavior", []))
     if keyword:
@@ -172,14 +250,31 @@ def search_question_bank(session_id: str, keyword: str, stage: str = "") -> str:
             f"你提到 {keyword}，请说明它的核心原理、使用场景和你实际遇到的边界问题。",
             f"如果让你基于 {keyword} 设计一个高可用方案，你会如何分层和容错？",
         ])
-    return json.dumps({"stage": selected_stage, "questions": candidates[:6]}, ensure_ascii=False)
+    return json.dumps({"stage": selected_stage, "level": "中级/高级", "questions": candidates[:6]}, ensure_ascii=False)
+
+
+@tool
+def get_junior_interview_reference(session_id: str, query: str = "", direction: str = "") -> str:
+    """读取初级程序员面试参考：等级边界、真实问法、方向重点和官方招聘证据。"""
+    context = get_context(session_id)
+    return json.dumps(
+        junior_reference_payload(context, query=query, direction=direction),
+        ensure_ascii=False,
+    )
 
 
 @tool
 def evaluate_candidate_answer(session_id: str, answer: str) -> str:
-    """评估候选人回答的结构、技术深度、个人贡献和量化证据。"""
+    """按当前面试维度评估回答：技术看正确性，行为/HR看行动、沟通与反思。"""
+    context = get_context(session_id)
     text = (answer or "").strip()
     lower = text.lower()
+    stage = str(context.get("current_stage") or "项目职责")
+    if is_junior_level(context.get("difficulty")):
+        result = score_junior_answer(text, stage, _job_skills(session_id), context=context)
+        result.update({"stage": stage, "level": "初级"})
+        return json.dumps(result, ensure_ascii=False)
+    technical = stage in TECHNICAL_STAGES
     score = 45
     signals: list[str] = []
     gaps: list[str] = []
@@ -188,29 +283,35 @@ def evaluate_candidate_answer(session_id: str, answer: str) -> str:
         signals.append("内容较完整")
     else:
         gaps.append("回答长度偏短")
-    star_terms = ["首先", "其次", "最后", "背景", "任务", "行动", "结果", "star", "步骤"]
+    star_terms = ["首先", "其次", "最后", "背景", "任务", "行动", "结果", "star", "步骤", "当时"]
     if sum(term in lower for term in star_terms) >= 2:
         score += 12
         signals.append("表达有结构")
     else:
-        gaps.append("缺少 STAR 结构")
-    job_skills = _job_skills(session_id)
-    hits = [skill for skill in job_skills if skill.lower() in lower]
-    score += min(15, len(hits) * 4)
-    if hits:
-        signals.append("技术关键词命中")
+        gaps.append("缺少情境和行动过程")
+    if technical:
+        job_skills = _job_skills(session_id)
+        hits = [skill for skill in job_skills if skill.lower() in lower]
+        score += min(15, len(hits) * 4)
+        if hits:
+            signals.append("技术关键词命中")
+        else:
+            gaps.append("没有命中岗位技术关键词")
     else:
-        gaps.append("没有命中岗位技术关键词")
+        behavior_hits = [term for term in ["沟通", "协调", "冲突", "推进", "反思", "改进", "学习", "取舍", "结果", "复盘"] if term in text]
+        score += min(15, len(behavior_hits) * 3)
+        if behavior_hits:
+            signals.append("有具体行为和反思")
+        else:
+            gaps.append("缺少具体行动或反思")
     if any(char.isdigit() for char in text):
-        score += 7
-        signals.append("使用了数据证据")
-    else:
-        gaps.append("缺少量化结果")
-    if any(term in lower for term in ["我负责", "我主导", "我设计", "我实现", "我优化", "我个人"]):
+        score += 5
+        signals.append("使用了数据或结果证据")
+    if any(term in text for term in ["我负责", "我主导", "我设计", "我实现", "我决定", "我协调", "我推动", "我选择"]):
         score += 8
-        signals.append("说明了个人贡献")
+        signals.append("说明了个人行动")
     else:
-        gaps.append("个人贡献不够明确")
+        gaps.append("个人行动不够明确")
     score = max(45, min(96, score))
     feedback = "；".join(signals) if signals else "回答方向正确，但缺少结构和证据"
     if gaps:
@@ -218,9 +319,10 @@ def evaluate_candidate_answer(session_id: str, answer: str) -> str:
     return json.dumps({
         "score": score,
         "feedback": feedback,
+        "stage": stage,
+        "evaluationMode": "TECHNICAL" if technical else "BEHAVIORAL",
         "signals": signals,
         "gaps": gaps,
-        "matchedSkills": hits,
     }, ensure_ascii=False)
 
 
@@ -243,6 +345,10 @@ def get_interview_progress(session_id: str) -> str:
     return json.dumps({
         "round": context.get("round", 1),
         "maxRounds": context.get("max_rounds", 4),
+        "interviewMode": context.get("interview_mode", "综合面"),
+        "currentStage": context.get("current_stage", ""),
+        "storyBankCount": len(context.get("story_bank", [])),
+        "plan": context.get("interview_plan", []),
         "done": int(context.get("round", 1)) >= int(context.get("max_rounds", 4)),
         "averageScore": round(sum(scores) / len(scores), 1) if scores else 0,
         "memory": context.get("memory", []),
@@ -321,6 +427,15 @@ def search_real_interview_patterns(session_id: str, query: str = "", stage: str 
         score = overlap * 1.5 + explicit_overlap * 3.0
         if wanted_stage and wanted_stage == item.get("stage"):
             score += 8.0
+        if is_junior_level(context.get("difficulty")):
+            item_level = " ".join([
+                str(item.get("level") or ""), str(item.get("role") or ""),
+                str(item.get("section") or ""),
+            ]).lower()
+            if any(token in item_level for token in ("校招", "实习", "应届", "初级", "1年")):
+                score += 4.0
+            if any(token in item_level for token in ("高级", "资深", "专家", "架构")):
+                score -= 3.0
         tags = [str(value).lower() for value in (item.get("tags") or [])]
         if any(tag and tag in context_text.lower() for tag in tags):
             score += 3.0
@@ -353,6 +468,7 @@ def search_real_interview_patterns(session_id: str, query: str = "", stage: str 
         "count": len(items),
         "query": context_text[:500],
         "stageFilter": wanted_stage,
+        "levelFilter": "初级" if is_junior_level(context.get("difficulty")) else "中级/高级",
         "items": items,
         "attribution": "真实面试资料来自用户提供的公开视频整理稿和公开面经合集。",
     }, ensure_ascii=False)
@@ -434,6 +550,7 @@ def search_interview_questions_qdrant(session_id: str, query: str = "", stage: s
 AGENT_TOOLS = [
     read_session_context,
     get_job_requirements,
+    get_junior_interview_reference,
     search_real_interview_patterns,
     search_question_bank,
     search_interview_questions_qdrant,

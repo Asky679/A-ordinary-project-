@@ -17,6 +17,7 @@ public interface JobRepository extends JpaRepository<JobEntity, Long> {
             WHERE status = 'ACTIVE'
               AND (:keyword = '' OR title ILIKE CONCAT('%', :keyword, '%')
                    OR company ILIKE CONCAT('%', :keyword, '%')
+                   OR COALESCE(display_title, '') ILIKE CONCAT('%', :keyword, '%')
                    OR COALESCE(search_text, '') ILIKE CONCAT('%', :keyword, '%'))
               AND (:city = '' OR city ILIKE CONCAT('%', :city, '%'))
             ORDER BY dataset_year DESC NULLS LAST, id DESC

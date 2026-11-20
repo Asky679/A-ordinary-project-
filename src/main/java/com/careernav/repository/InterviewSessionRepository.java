@@ -6,5 +6,13 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.List;
 
 public interface InterviewSessionRepository extends JpaRepository<InterviewSessionEntity, Long> {
-    List<InterviewSessionEntity> findByResumeIdAndStatusOrderByUpdatedAtDesc(Long resumeId, String status);
+    List<InterviewSessionEntity> findByDeletedAtIsNullOrderByUpdatedAtDesc();
+
+    List<InterviewSessionEntity> findByResumeIdAndStatusAndDeletedAtIsNullOrderByUpdatedAtDesc(Long resumeId, String status);
+
+    List<InterviewSessionEntity> findByResumeIdAndDeletedAtIsNullOrderByUpdatedAtDesc(Long resumeId);
+
+    List<InterviewSessionEntity> findByDeletedAtIsNotNullOrderByDeletedAtDesc();
+
+    long countByDeletedAtIsNull();
 }

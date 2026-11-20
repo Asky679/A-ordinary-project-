@@ -57,7 +57,7 @@ class InterviewSkillEvidenceScopeTest {
                         List.of("回答中说明了 Java 项目实现"), LocalDateTime.now()),
                 new InterviewSkillEvidence("PostgreSQL", 20, "待验证", 0.8, false, "INTERVIEW",
                         List.of("面试未形成明确证据：未提及 PostgreSQL"), LocalDateTime.now()))));
-        when(repository.findByResumeIdAndStatusOrderByUpdatedAtDesc(1L, "COMPLETED"))
+        when(repository.findByResumeIdAndStatusAndDeletedAtIsNullOrderByUpdatedAtDesc(1L, "COMPLETED"))
                 .thenReturn(List.of(session));
 
         List<InterviewSkillEvidence> result = service.latestForResume(1L);

@@ -33,4 +33,24 @@ class JobInterviewBlueprintServiceTest {
         assertFalse(blueprint.interviewScenarios().isEmpty());
         assertTrue(blueprint.hardConstraints().stream().anyMatch(value -> value.contains("本科")));
     }
+
+    @Test
+    void removesGenericAdministrativeDutiesFromInterviewQuestions() {
+        AgentModelClient model = mock(AgentModelClient.class);
+        when(model.available()).thenReturn(false);
+        JobInterviewBlueprintService service = new JobInterviewBlueprintService(model);
+        JobView job = new JobView(
+                11L, "job-11", "Java开发", "测试公司", "长沙", "8-12K", "不限", "经验不限",
+                List.of("Java"), List.of("完成上级安排的工作", "负责和前端完成App接口开发"),
+                "负责后端Java开发和接口联调", "完成领导交办的其他工作",
+                "熟悉 Java 和 Spring Boot", "ORIGINAL", null, null,
+                "测试来源", null, null, null, null, null, "ACTIVE", "Java后端", "互联网",
+                "20-99人", "长沙");
+
+        JobInterviewBlueprint blueprint = service.build(job, null);
+
+        assertTrue(blueprint.coreResponsibilities().stream().noneMatch(value -> value.contains("上级")));
+        assertTrue(blueprint.coreResponsibilities().stream().noneMatch(value -> value.contains("领导")));
+        assertTrue(blueprint.coreResponsibilities().stream().anyMatch(value -> value.contains("后端 Java") || value.contains("接口")));
+    }
 }

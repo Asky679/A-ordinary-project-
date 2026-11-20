@@ -501,18 +501,26 @@ public class JobService {
     }
 
     public JobView toView(JobEntity entity) {
+        String title = firstNonBlank(entity.getDisplayTitle(), entity.getTitle());
+        String description = firstNonBlank(entity.getDisplayDescription(), entity.getDescription());
+        String jobDescription = firstNonBlank(entity.getDisplayDescription(), entity.getJobDescription());
+        String requirements = firstNonBlank(entity.getDisplayRequirements(), entity.getJobRequirements());
         return new JobView(
-                entity.getId(), entity.getExternalId(), entity.getTitle(), entity.getCompany(), entity.getCity(),
+                entity.getId(), entity.getExternalId(), title, entity.getCompany(), entity.getCity(),
                 entity.getSalary(), entity.getEducation(), entity.getExperience(),
                 jsonCodec.readList(entity.getSkillsJson(), String.class),
                 jsonCodec.readList(entity.getResponsibilitiesJson(), String.class),
-                entity.getDescription(), entity.getJobDescription(), entity.getJobRequirements(),
+                description, jobDescription, requirements,
                 entity.getContentOrigin(), entity.getAiModel(),
                 entity.getAiConfidence() == null ? null : entity.getAiConfidence().toPlainString(),
                 entity.getSource(), entity.getSourceUrl(), entity.getCollectedAt(), entity.getPublishedAt(),
                 entity.getValidThrough(), entity.getLastSeenAt(), entity.getStatus() == null ? "ACTIVE" : entity.getStatus(),
                 entity.getCategory(), entity.getIndustry(), entity.getCompanySize(), entity.getLocation()
         );
+    }
+
+    private String firstNonBlank(String first, String fallback) {
+        return first != null && !first.isBlank() ? first : fallback;
     }
 
     public Set<String> normalize(List<String> skills) {

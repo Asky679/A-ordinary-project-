@@ -35,4 +35,38 @@ public class InterviewController {
                                              @Valid @RequestBody InterviewAnswerRequest request) {
         return ApiResponse.ok(service.answer(id, request.answer()));
     }
+
+    @DeleteMapping("/{id}")
+    public ApiResponse<Void> delete(@PathVariable Long id) {
+        service.delete(id);
+        return ApiResponse.ok("历史对话已删除", null);
+    }
+
+
+    @GetMapping("/trash")
+    public ApiResponse<List<InterviewView>> trash() {
+        return ApiResponse.ok(service.trash());
+    }
+
+    @DeleteMapping
+    public ApiResponse<Integer> clearAll() {
+        return ApiResponse.ok("\u7ec3\u4e60\u8bb0\u5f55\u5df2\u79fb\u5165\u56de\u6536\u7ad9", service.clearAll());
+    }
+
+    @DeleteMapping("/trash")
+    public ApiResponse<Integer> emptyTrash() {
+        return ApiResponse.ok("\u56de\u6536\u7ad9\u5df2\u6e05\u7a7a", service.emptyTrash());
+    }
+
+    @PostMapping("/{id}/restore")
+    public ApiResponse<Void> restore(@PathVariable Long id) {
+        service.restore(id);
+        return ApiResponse.ok("\u7ec3\u4e60\u8bb0\u5f55\u5df2\u6062\u590d", null);
+    }
+
+    @DeleteMapping("/{id}/permanent")
+    public ApiResponse<Void> permanentDelete(@PathVariable Long id) {
+        service.permanentDelete(id);
+        return ApiResponse.ok("\u7ec3\u4e60\u8bb0\u5f55\u5df2\u6c38\u4e45\u5220\u9664", null);
+    }
 }

@@ -68,12 +68,28 @@ class InterviewServiceProjectEvidenceTest {
         assertTrue(question.contains("不需要提供源码"));
     }
 
+    @Test
+    void comprehensiveInterviewStartsWithMotivationInsteadOfTechnicalDrill() throws Exception {
+        InterviewService service = service();
+        InterviewProjectEvidence evidence = new InterviewProjectEvidence(
+                "企业订单系统", "后端开发", "5人", "下单到支付", "Java、Redis",
+                "订单服务和幂等处理", "重复回调", "响应时间降低30%", "企业保密项目", "");
+
+        Method method = InterviewService.class.getDeclaredMethod(
+                "firstQuestion", ResumeView.class, com.careernav.domain.ApiModels.JobView.class,
+                String.class, String.class, InterviewProjectEvidence.class);
+        method.setAccessible(true);
+        String question = (String) method.invoke(service, resume(), job(), "初级 · 标准", "综合面", evidence);
+
+        assertTrue(question.contains("为什么选择"));
+        assertTrue(!question.contains("请具体说明订单状态"));
+    }
     private InterviewService service() {
         return new InterviewService(
                 mock(InterviewSessionRepository.class), mock(ResumeService.class), mock(JobService.class),
                 new JsonCodec(new ObjectMapper()), mock(AgentModelClient.class),
                 mock(LangGraphInterviewClient.class), mock(InterviewSkillEvidenceService.class),
-                mock(JobInterviewBlueprintService.class));
+                mock(JobInterviewBlueprintService.class), mock(CandidateStoryService.class));
     }
 
     private com.careernav.domain.ApiModels.JobView job() {

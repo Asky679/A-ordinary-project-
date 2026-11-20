@@ -182,11 +182,11 @@ export function studio(root, signal, query) {
 
   function renderTools() {
     tools.innerHTML = `<button type="button" class="quiet studio-preview-action" data-tool="preview">预览简历 ↓</button>
-      <button type="button" class="quiet" data-tool="ats">ATS 检查</button>`+
+      <button type="button" class="quiet" data-tool="ats">ATS 检查</button>
+      <button type="button" class="quiet" data-tool="education">上传学历证明</button>`+
       (currentId? `<a class="quiet" href="/api/resumes/${esc(currentId)}/pdf" download>导出 PDF</a>
       <button type="button" class="quiet" data-tool="versions">版本档案</button>
       <button type="button" class="quiet" data-tool="guidance">写作指导</button>
-      <button type="button" class="quiet" data-tool="education">教育核验</button>
       <button type="button" class="quiet" data-tool="locks">事实保护</button>`:'');
     $$('[data-tool]',tools).forEach(button=>button.addEventListener('click',task(button,async()=>{
       const id=currentId;
@@ -203,17 +203,23 @@ export function studio(root, signal, query) {
           refreshSelect();
         }).catch(cause=>notify(cause.message,true));
       });
-      if(button.dataset.tool==='education') await education(id,values=>{
-        if (currentId!==id) return;
-        draft={...draft,...values};
-        render();
-        $('#dialog').close();
-        const section = $('[data-edit="school"]',editor);
-        section.open = true;
-        $('input',section)?.focus({preventScroll:true});
-        section.scrollIntoView({block:'nearest'});
-        notify('已填入草稿，核对后保存简历。');
-      });
+      if(button.dataset.tool==='education') {
+        if (!id) {
+          notify('请先保存简历，再上传学历证明。', true);
+          return;
+        }
+        await education(id,values=>{
+          if (currentId!==id) return;
+          draft={...draft,...values};
+          render();
+          $('#dialog').close();
+          const section = $('[data-edit="school"]',editor);
+          section.open = true;
+          $('input',section)?.focus({preventScroll:true});
+          section.scrollIntoView({block:'nearest'});
+          notify('已填入草稿，核对后保存简历。');
+        });
+      }
       if(button.dataset.tool==='locks') await locks(id);
       if(button.dataset.tool==='guidance') {
         let projectIndex;

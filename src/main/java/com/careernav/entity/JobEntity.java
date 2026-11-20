@@ -40,6 +40,9 @@ public class JobEntity {
     private String location;
     @Column(columnDefinition = "text")
     private String searchText;
+    @Column(columnDefinition = "text") private String displayTitle;
+    @Column(columnDefinition = "text") private String displayDescription;
+    @Column(columnDefinition = "text") private String displayRequirements;
     private String contentHash;
 
     public Long getId() { return id; } public void setId(Long id) { this.id = id; }
@@ -72,4 +75,7 @@ public class JobEntity {
     public String getCompanySize() { return companySize; } public void setCompanySize(String v) { companySize = v; }
     public String getLocation() { return location; } public void setLocation(String v) { location = v; }
     public String getSearchText() { return searchText; } public void setSearchText(String v) { searchText = v; }
+    public String getDisplayTitle() { return displayTitle; } public void setDisplayTitle(String v) { displayTitle = v; }
+    public String getDisplayDescription() { return displayDescription; } public void setDisplayDescription(String v) { displayDescription = v; }
+    public String getDisplayRequirements() { return displayRequirements; } public void setDisplayRequirements(String v) { displayRequirements = v; }
 }

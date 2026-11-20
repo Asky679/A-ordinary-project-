@@ -168,6 +168,23 @@ public final class ApiModels {
     public record CityJobPage(String city, long total, int page, int size,
                               List<JobRecommendation> items) {}
 
+    /** 职业星图：规则分类后的职业族、方向和岗位统计。 */
+    public record CareerLevelCount(String level, long count) {}
+
+    public record CareerRoleMap(String id, String name, String familyId, String familyName,
+                                long jobCount, List<CareerLevelCount> levels, List<String> skills,
+                                List<String> nextRoles, List<JobView> sampleJobs, String searchKeyword) {}
+
+    public record CareerFamilyMap(String id, String name, String summary, List<CareerRoleMap> roles) {}
+
+    public record CareerEdge(String from, String to, String type) {}
+
+    public record CareerMap(long totalJobs, long classifiedJobs, List<CareerFamilyMap> families,
+                            List<CareerEdge> edges) {}
+
+    public record CareerRoleJobs(String roleId, String roleName, String familyName, long total,
+                                  int page, int size, List<JobView> items) {}
+
     /** 面试 Agent 形成的技能熟练度证据。 */
     public record InterviewSkillEvidence(String skill, int score, String level, double confidence,
                                          boolean verified, String source, List<String> evidence,
@@ -181,6 +198,12 @@ public final class ApiModels {
                                         List<String> hardConstraints, String companyStyle,
                                         List<String> coveragePlan, String sourceSummary) {}
 
+    public record ProjectClueRequest(String projectName, String role, String techStack,
+                                     String description, String challenge, String highlight,
+                                     String targetRole) {}
+
+    public record ProjectClueAnalysis(String projectName, String summary,
+                                      List<String> workstreams, String source) {}
     /** 脱敏项目证据卡：企业项目不需要上传源码。 */
     public record InterviewProjectEvidence(String projectName, String role, String teamSize,
                                            String businessFlow, String techStack, String implementation,
@@ -197,26 +220,38 @@ public final class ApiModels {
 
     public record InterviewStartRequest(@NotNull(message = "请选择简历") Long resumeId,
                                         @NotNull(message = "请选择目标岗位") Long jobId,
-                                        String difficulty,
+                                        String difficulty, String interviewMode,
                                         @Valid InterviewProjectEvidence projectEvidence) {
         public InterviewStartRequest(Long resumeId, Long jobId, String difficulty) {
-            this(resumeId, jobId, difficulty, null);
+            this(resumeId, jobId, difficulty, "综合面", null);
+        }
+
+        public InterviewStartRequest(Long resumeId, Long jobId, String difficulty,
+                                     InterviewProjectEvidence projectEvidence) {
+            this(resumeId, jobId, difficulty, "综合面", projectEvidence);
         }
     }
-
     public record InterviewAnswerRequest(@NotBlank(message = "回答不能为空") String answer) {}
 
     public record InterviewMessage(String role, String content, LocalDateTime timestamp,
                                    Integer score, String feedback) {}
 
     public record InterviewView(Long id, Long resumeId, Long jobId, String jobTitle,
-                                String difficulty, String status, int currentRound, int totalRounds,
+                                String interviewMode, String difficulty, String status,
+                                int currentRound, int totalRounds,
                                 int overallScore, List<InterviewMessage> messages,
                                 List<InterviewSkillEvidence> skillEvidence,
                                 InterviewProjectEvidence projectEvidence,
                                 JobInterviewBlueprint jobBlueprint,
-                                LocalDateTime startedAt, LocalDateTime updatedAt) {}
-
+                                LocalDateTime startedAt, LocalDateTime updatedAt, LocalDateTime deletedAt) {}
+    /** 跨场次候选人故事库中的 STAR+R 故事。 */
+    public record CandidateStoryView(Long id, Long resumeId, Long jobId, Long sourceSessionId,
+                                     List<Long> sourceSessionIds, Integer sourceRound, String interviewMode, String title,
+                                     String projectName, String situation, String task, String action,
+                                     String result, String reflection, List<String> competencies,
+                                     String evidence, Integer confidence, int usageCount,
+                                     LocalDateTime lastUsedAt, LocalDateTime createdAt, LocalDateTime updatedAt,
+                                     LocalDateTime deletedAt) {}
     public record DiagnosisRequest(Long resumeId, Long jobId) {}
 
     public record DiagnosisDimension(String name, int score, int weight, String comment) {}
