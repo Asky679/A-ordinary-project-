@@ -17,7 +17,7 @@
 | 简历工坊 | 结构化编辑基础信息、技能、项目、自我评价；支持 PDF / 扫描件 / 图片导入、OCR 识别和实时预览 |
 | 岗位雷达 | 岗位检索、城市筛选、技能与目标方向匹配、薪资展示、MCP 岗位同步 |
 | 岗位推荐 | 技能覆盖率、岗位方向、城市、学历等综合评分，输出匹配技能和待补技能 |
-| 模拟面试 | 独立页面，先选择简历和目标岗位，填写脱敏项目证据卡后完成八轮项目面试；面试完成后在本页面内解锁简历诊断 |
+| 模拟面试 | 独立页面，先选择简历和目标岗位，填写脱敏项目证据卡后完成 6—10 轮自适应项目面试；面试完成后在本页面内解锁简历诊断 |
 | 项目面试助手 | 读取公开 Java 仓库或上传 ZIP，用 JavaParser 定位真实源码片段，生成五维分层追问 |
 | 简历诊断 | 联合简历质量、岗位要求、项目证据和真实面试证据计算可解释评分，并给出失分原因 |
 | 学习路线 | 根据目标岗位技能图谱定位差距，输出阶段目标、主题和交付物 |
@@ -26,6 +26,60 @@
 | MCP | 内置 `/mcp` JSON-RPC 服务端，同时提供可配置的远程 MCP 招聘工具客户端 |
 | 面试题库 | 从 4 个公开 GitHub 仓库抽取 1,508 道面试题，写入独立 Qdrant 集合，面试 Agent 按会话上下文实时检索真实题目与参考要点 |
 | 岗位推荐 Agent | 读简历后自主规划检索、必要时换说法重试，再用加权算法精排岗位，输出推荐清单与技能缺口；分数全部可追溯 |
+
+## 演示数据与真实数据
+
+业务记录带有 `dataKind` 标记：
+
+- `REAL`：真实学生数据
+- `DEMO`：答辩、测试和演示数据
+- `LEGACY`：旧版本中尚未归属账号的数据
+
+管理员顶部菜单提供“演示数据管理”：
+
+- 创建 DEMO 角色账号
+- 首次创建时把旧的未归属测试数据归入 DEMO 账号
+- 查看 DEMO 简历、面试、诊断、故事数量
+- 默认隐藏 DEMO 数据，可手动切换
+- 一键清空 DEMO 数据，不影响真实学生账号
+
+相关接口：
+
+```text
+GET    /api/admin/demo-data/stats
+POST   /api/admin/demo-account
+DELETE /api/admin/demo-data
+```
+
+## 账号与数据隔离
+
+系统提供注册、登录和管理员/学生角色。第一个注册账号自动成为管理员，之后注册的账号默认为学生。
+
+- 密码使用 BCrypt 哈希保存，不保存明文密码
+- 登录成功后使用 Bearer Token，默认有效期 7 天
+- 简历、面试、诊断报告和成长故事绑定 `user_id`
+- 学生只能读取和修改自己的数据
+- 管理员可以查看全部用户和全部业务数据
+- 岗位目录等公共数据仍允许未登录浏览
+- 旧数据如果没有 `user_id`，仅管理员可见，不会自动分配给新注册学生
+
+部署时必须设置独立密钥：
+
+```text
+APP_AUTH_SECRET=请替换为足够长的随机字符串
+APP_AUTH_TOKEN_HOURS=168
+```
+
+相关接口：
+
+```text
+POST /api/auth/register
+POST /api/auth/login
+GET  /api/auth/me
+POST /api/auth/logout
+GET  /api/admin/users
+GET  /api/admin/stats
+```
 
 ## 技术架构
 
@@ -48,12 +102,27 @@ Spring Boot REST API
         MCP JSON-RPC source (可选)
 
 业务数据：PostgreSQL
-岗位向量：Qdrant -> careernav_jobs（4,110 条）
-面试题向量：Qdrant -> careernav_interview_questions（1,508 条）
+岗位向量：Qdrant -> careernav_jobs（9,189 个向量点）
+面试题向量：Qdrant -> careernav_interview_questions（1,508 个向量点）
 本地向量生成：TF-IDF + TruncatedSVD 256 维（岗位 5001 / 面试题 5002）
 ```
 
 详细设计见 [docs/architecture.md](docs/architecture.md)。
+
+## 一键 Docker 部署
+
+项目根目录提供 `compose.yml`，统一编排 PostgreSQL、Qdrant、两个 Embedding 服务、LangGraph Agent 和 Spring Boot。
+
+```bash
+cp .env.docker.example .env
+./ops/docker/prepare-seed.sh output/careernav-database-package-2026-11-25.zip
+docker compose up -d --build
+```
+
+完整的环境变量、种子导入、健康检查、日志、备份和恢复步骤见
+[docs/deployment-docker.md](docs/deployment-docker.md)。
+
+> `docker/seed`、`data/models`、`.env` 和备份文件均被版本库忽略，需要单独部署到服务器。
 
 ## 快速启动
 
@@ -65,6 +134,23 @@ Spring Boot REST API
 运行前必须启动 PostgreSQL、Qdrant 和本地 Embedding 服务。PostgreSQL 只保存业务数据，Qdrant 专门保存岗位向量。具体命令见下方运行说明。
 
 浏览器地址：<http://localhost:8080>
+
+## Agent 状态持久化
+
+面试 Agent 的状态保存在 PostgreSQL：
+
+- 当前轮次、动态路线和已访问阶段
+- 已回答内容和评分历史
+- 面试记忆
+- 撤回栈
+- LangGraph checkpoint
+
+因此 LangGraph 服务重启后，可以继续原来的面试和撤回上一题。数据库不可用时自动回退到内存模式。
+
+```text
+CAREERNAV_DB_URL=postgresql://careernav@127.0.0.1:5432/careernav
+LANGGRAPH_STATE_PERSISTENCE=true
+```
 
 ## PostgreSQL + Qdrant 运行方式
 
@@ -106,12 +192,20 @@ $env:EMBEDDING_DIMENSIONS="256"
 .\mvnw.cmd spring-boot:run
 ```
 
-当前数据库包含 4,110 条岗位：
+当前数据口径：
 
-- 3,588 条 GitHub 统一岗位数据
-- 522 条 `boss_python_jobs.csv` 原始岗位数据
+| 数据 | 数量 |
+|---|---:|
+| PostgreSQL 岗位总行数（含历史状态） | 9,435 |
+| PostgreSQL `ACTIVE` 有效岗位 | 6,657 |
+| PostgreSQL `EXPIRED` 历史岗位 | 2,510 |
+| PostgreSQL `STALE` 待确认岗位 | 268 |
+| Qdrant `careernav_jobs` 向量点 | 9,189 |
+| Qdrant `careernav_interview_questions` 向量点 | 1,508 |
 
-岗位向量已全部写入 Qdrant：
+Qdrant 向量点数量不等于 PostgreSQL 岗位总行数：向量集合可能保留历史索引记录；业务页面和推荐接口只使用 PostgreSQL 中状态为 `ACTIVE` 的岗位。不要用 Qdrant 的 9,189 直接替代岗位总数，也不要声称 9,435 条全部都是当前有效岗位。
+
+岗位向量集合状态：
 
 ```text
 http://127.0.0.1:6333/collections/careernav_jobs
@@ -228,7 +322,7 @@ multipart:
 - OCR 可能误识别姓名、电话、日期、学校和数字，保存前必须人工核对；
 - 最多处理前 8 页，超过部分需要手动补充。
 
-## 脱敏项目证据卡与八轮项目面试
+## 脱敏项目证据卡与自适应项目面试
 
 企业项目通常不能上传源码或 ZIP。因此面试主流程不依赖代码，而是要求用户填写脱敏项目证据卡：
 
@@ -239,18 +333,19 @@ multipart:
 - 成果与验证方式
 - 信息范围（企业保密 / 个人公开 / 课程项目）
 
-面试 Agent 会固定围绕所选项目推进八轮追问：
+面试记录带有评分版本。新面试写入当前评分版本；旧记录如果未重算，会在成长花园中标记为“旧评分规则”，只显示相对等级，不和新版本分数直接横比。会话 98—107 已使用 `ops/interview/rescore_legacy_sessions.py` 按当前初级评分规则重算，原总分保存在 `legacy_overall_score`，重算后的旧技能证据已清除。
 
-```text
-职责边界 -> 业务链路 -> 技术实现 -> 故障与边界
--> 方案取舍 -> 结果验证 -> 证据补强 -> 迁移验证
-```
+面试过程中可以撤回上一轮回答：系统会删除最后一轮回答、反馈和由它生成的下一问，恢复上一题、轮次、阶段和评分，并清理 Agent 会话记忆；如果用新回答重新提交，后续追问会基于新回答重新生成。已完成的面试也可以撤回，系统会同步移除本场生成的成长故事。
+
+面试 Agent 会围绕所选项目和目标方向动态安排 6—10 轮追问。所有等级不再固定维度顺序，而是根据上一轮得分和证据缺口，从“职责边界、业务链路、技术实现、故障边界、方案取舍、结果验证、证据补强、迁移验证”中选择下一项；必须覆盖核心维度，候选人反问始终作为收尾。
+
+Java、前端、测试、运维、数据/AI、嵌入式、网络安全和 Go 后端各自使用独立的方向级问题矩阵，同一阶段也会针对不同方向提问。
 
 简历里即使有多个项目，本场面试也只展示证据卡中选中的项目。面试后页面会生成项目追问复盘，技能证据评估也会使用项目证据卡校验回答，不再要求查看源码。 面试技能证据只覆盖本场岗位要求或面试问答中实际触及的技能；简历里存在但本场没有考察的技能，不会显示为未通过，也不参与本场技能扣分。
 
 ### JD 面试蓝图
 
-选择目标岗位后，系统会使用岗位库中的技能、职责、`job_description`、`job_requirements`、经验、学历和行业数据生成 JD 面试蓝图，包括必备技能、核心职责、面试场景、硬性条件和八轮覆盖计划。蓝图会保存到面试会话，并同时用于问题规划、追问和技能证据评估。
+选择目标岗位后，系统会使用岗位库中的技能、职责、`job_description`、`job_requirements`、经验、学历和行业数据生成 JD 面试蓝图，包括必备技能、核心职责、面试场景、硬性条件和动态覆盖计划。蓝图会保存到面试会话，并同时用于问题规划、追问和技能证据评估。
 
 ```text
 GET /api/interviews/blueprint?jobId=147953
@@ -282,7 +377,7 @@ DELETE /api/resumes/{id}/education-verification 取消验证并删除核验记�
 
 ```text
 选择简历和目标岗位
--> 完成八轮项目面试
+-> 完成 6—10 轮自适应项目面试
 -> 形成技能证据
 -> 在面试页或简历诊断页解锁最终诊断
 ```
@@ -321,7 +416,7 @@ python interview-agent/scripts/build_experience_patterns.py
 
 ## 面试驱动的技能验证
 
-系统不再要求用户做 Java 选择题。岗位匹配阶段先看简历技能清单是否覆盖岗位要求：命中即计为满足，全部命中时技能因子为 1.0；面试评分用于后续诊断中的能力深度、证据质量和补强建议，不反向否定已填写的技能。用户仍需选择岗位、填写脱敏项目证据卡并完成八轮项目面试，才能生成最终诊断。
+系统不再要求用户做 Java 选择题。岗位匹配阶段先看简历技能清单是否覆盖岗位要求：命中即计为满足，全部命中时技能因子为 1.0；面试评分用于后续诊断中的能力深度、证据质量和补强建议，不反向否定已填写的技能。用户仍需选择岗位、填写脱敏项目证据卡并完成 6—10 轮自适应项目面试，才能生成最终诊断。
 
 ```text
 职责边界 -> 业务链路 -> 技术实现 -> 故障与边界 -> 方案取舍 -> 结果验证 -> 证据补强 -> 迁移验证
@@ -337,7 +432,7 @@ python interview-agent/scripts/build_experience_patterns.py
 - 面试评分是可解释的求职准备证据，不是官方技能认证。
 
 ```text
-POST /api/interviews                         创建八轮项目面试
+POST /api/interviews                         创建自适应项目面试
 POST /api/interviews/{id}/answers            提交回答并获取下一问
 GET  /api/interviews/evidence?resumeId=&jobId=  读取最近面试技能证据
 ```
@@ -520,7 +615,8 @@ GET  /api/admin/collection/market/latest
 | POST | `/api/resumes/import` | PDF/OCR 简历识别并返回结构化草稿 |
 | PUT/DELETE | `/api/resumes/{id}` | 更新与删除简历 |
 | GET | `/api/jobs` | 岗位列表与筛选 |
-| GET | `/api/jobs/recommend?resumeId=` | 个性化岗位推荐 |
+| GET | `/api/jobs/page?keyword=&city=&page=&size=` | 普通岗位浏览，服务端分页返回全部符合条件的 ACTIVE 岗位 |
+| GET | `/api/jobs/recommend?resumeId=` | 个性化岗位推荐；全国模式使用全部 ACTIVE 岗位作为候选集 |
 | POST | `/api/jobs/refresh` | 从远程 MCP 刷新岗位 |
 | POST | `/api/interviews` | 创建模拟面试 |
 | POST | `/api/interviews/{id}/answers` | 提交回答并获取下一问 |

@@ -16,6 +16,31 @@
 </head>
 <body>
   <a class="skip" href="#content">跳到内容</a>
+  <section class="auth-gate" id="auth-gate" hidden aria-labelledby="auth-title">
+    <div class="auth-card">
+      <p class="auth-kicker">CareerNav · Wayforward</p>
+      <h1 id="auth-title">登录后继续你的求职旅程</h1>
+      <p class="auth-note">每个账号只看到自己的简历、面试、诊断和成长故事。首个注册账号自动成为管理员。</p>
+      <div class="auth-tabs" role="tablist">
+        <button type="button" class="active" data-auth-tab="login">登录</button>
+        <button type="button" data-auth-tab="register">注册</button>
+      </div>
+      <form class="auth-form" id="login-form">
+        <label>用户名或邮箱<input name="account" autocomplete="username" required></label>
+        <label>密码<input name="password" type="password" autocomplete="current-password" minlength="8" required></label>
+        <button class="button primary" type="submit">登录</button>
+      </form>
+      <form class="auth-form" id="register-form" hidden>
+        <label>用户名<input name="username" autocomplete="username" minlength="3" maxlength="40" required></label>
+        <label>邮箱<input name="email" type="email" autocomplete="email" required></label>
+        <label>显示名称<input name="displayName" maxlength="80" placeholder="例如：毛世豪"></label>
+        <label>密码<input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
+        <label>确认密码<input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required></label>
+        <button class="button primary" type="submit">创建账号</button>
+      </form>
+      <p class="auth-error" id="auth-error" role="alert"></p>
+    </div>
+  </section>
   <header class="bar">
     <a class="wordmark" href="#home" aria-label="启程 · 返回城市地图"><span class="brand-mark" aria-hidden="true"></span><strong>启程</strong><small>Wayforward</small></a>
     <a class="map-home" href="#home" hidden><span aria-hidden="true">←</span> 返回地图</a>
@@ -31,6 +56,10 @@
         <a href="#project?work=1">项目工作台</a>
       </nav>
     </details>
+    <span class="auth-user" id="auth-user" hidden></span>
+    <button id="demo-toggle" class="quiet" type="button" hidden>显示演示数据</button>
+    <button id="demo-admin" class="quiet" type="button" hidden>演示数据管理</button>
+    <button id="logout" class="quiet" type="button" hidden>退出登录</button>
     <button id="motion" class="quiet" type="button" aria-pressed="true">动效开</button>
   </header>
   <main id="content" tabindex="-1"></main>

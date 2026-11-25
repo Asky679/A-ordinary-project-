@@ -1,5 +1,6 @@
 package com.careernav.service;
 
+import com.careernav.auth.AuthContext;
 import com.careernav.common.BusinessException;
 import com.careernav.domain.ApiModels.*;
 import com.careernav.entity.InterviewSessionEntity;
@@ -14,7 +15,10 @@ import java.util.stream.Collectors;
 
 @Service
 public class InterviewService {
-    private static final int TOTAL_ROUNDS = 8;
+    private static final int TOTAL_ROUNDS = 10;
+    private static final int FALLBACK_ROUNDS = 8;
+    private static final String JUNIOR_SCORING_VERSION = "JUNIOR_ADAPTIVE_2026_11_V2";
+    private static final String STANDARD_SCORING_VERSION = "STANDARD_ADAPTIVE_2026_11_V1";
     private static final Map<String, List<String>> MODE_PLANS = Map.of(
             "综合面", List.of("求职动机", "项目职责", "业务链路", "技术实现", "故障与取舍", "团队协作", "失败与学习", "候选人反问"),
             "技术面", List.of("个人背景", "项目职责", "业务链路", "技术实现", "故障与取舍", "结果验证", "技术判断", "候选人反问"),
@@ -67,14 +71,18 @@ public class InterviewService {
                 LocalDateTime.now(), null, null));
 
         InterviewSessionEntity entity = new InterviewSessionEntity();
+        entity.setUserId(AuthContext.userIdOrNull());
+        entity.setDataKind(AuthContext.dataKind());
         entity.setResumeId(resume.id());
         entity.setJobId(job.id());
         entity.setJobTitle(job.title());
         entity.setDifficulty(difficulty);
         entity.setInterviewMode(interviewMode);
+        entity.setScoringVersion(isJuniorDifficulty(difficulty) ? JUNIOR_SCORING_VERSION : STANDARD_SCORING_VERSION);
         entity.setStatus("IN_PROGRESS");
         entity.setCurrentRound(1);
-        entity.setTotalRounds(TOTAL_ROUNDS);
+        boolean agentAvailable = langGraphClient.available();
+        entity.setTotalRounds(agentAvailable ? TOTAL_ROUNDS : FALLBACK_ROUNDS);
         entity.setOverallScore(0);
         entity.setMessagesJson(jsonCodec.write(messages));
         entity.setProjectEvidenceJson(jsonCodec.write(projectEvidence));
@@ -83,15 +91,18 @@ public class InterviewService {
         entity.setUpdatedAt(entity.getStartedAt());
         entity = repository.save(entity);
 
-        if (langGraphClient.available()) {
+        if (agentAvailable) {
             LangGraphInterviewClient.AgentTurn turn = langGraphClient.start(entity.getId(), resume, job, difficulty, interviewMode, projectEvidence, jobBlueprint, storyBank);
             if (turn != null && turn.question() != null && !turn.question().isBlank()) {
                 List<InterviewMessage> agentMessages = new ArrayList<>();
                 agentMessages.add(new InterviewMessage("assistant", turn.question(), LocalDateTime.now(), null, null));
                 entity.setMessagesJson(jsonCodec.write(agentMessages));
                 entity.setCurrentRound(Math.max(1, turn.round()));
+                entity.setTotalRounds(Math.max(1, turn.targetRounds()));
                 entity.setUpdatedAt(LocalDateTime.now());
                 entity = repository.save(entity);
+            } else {
+                entity.setTotalRounds(FALLBACK_ROUNDS);
             }
         }
         return toView(entity);
@@ -123,13 +134,14 @@ public class InterviewService {
                 int oldTotal = entity.getOverallScore() == null ? 0 : entity.getOverallScore();
                 entity.setOverallScore((int) Math.round(
                         (oldTotal * (answered - 1) + score) / (double) answered));
+                entity.setTotalRounds(Math.max(1, turn.targetRounds()));
 
-                if (answered >= entity.getTotalRounds()) {
+                if (turn.done() || answered >= entity.getTotalRounds()) {
                     entity.setStatus("COMPLETED");
+                    entity.setTotalRounds(turn.done() ? answered : entity.getTotalRounds());
                     entity.setCurrentRound(entity.getTotalRounds());
                     boolean technicalAssessment = assessesTechnicalSkills(interviewMode);
                     if (technicalAssessment) saveSkillEvidence(entity, resume, job, messages);
-            storyBankService.ingestCompletedSession(entity, resume, job, messages);
                     storyBankService.ingestCompletedSession(entity, resume, job, messages);
                     messages.add(new InterviewMessage("assistant",
                             technicalAssessment
@@ -150,8 +162,11 @@ public class InterviewService {
             }
         }
 
+        int fallbackTotalRounds = Math.min(
+                entity.getTotalRounds() == null ? FALLBACK_ROUNDS : entity.getTotalRounds(),
+                FALLBACK_ROUNDS);
         Evaluation evaluation = evaluate(answer, job, resume, projectEvidence, interviewMode,
-                entity.getCurrentRound(), entity.getTotalRounds(), entity.getDifficulty());
+                entity.getCurrentRound(), fallbackTotalRounds, entity.getDifficulty());
         messages.add(new InterviewMessage("user", answer.trim(), LocalDateTime.now(),
                 evaluation.score(), evaluation.feedback()));
 
@@ -160,8 +175,9 @@ public class InterviewService {
         entity.setOverallScore((int) Math.round(
                 (oldTotal * (answered - 1) + evaluation.score()) / (double) answered));
 
-        if (answered >= entity.getTotalRounds()) {
+        if (answered >= fallbackTotalRounds) {
             entity.setStatus("COMPLETED");
+            entity.setTotalRounds(fallbackTotalRounds);
             boolean technicalAssessment = assessesTechnicalSkills(interviewMode);
             if (technicalAssessment) saveSkillEvidence(entity, resume, job, messages);
             storyBankService.ingestCompletedSession(entity, resume, job, messages);
@@ -183,6 +199,49 @@ public class InterviewService {
         return toView(repository.save(entity));
     }
 
+    @Transactional
+    public InterviewView undo(Long id) {
+        InterviewSessionEntity entity = getEntity(id);
+        if (entity.getDeletedAt() != null) throw new BusinessException("面试记录已删除，无法撤回");
+        List<InterviewMessage> messages = new ArrayList<>(
+                jsonCodec.readList(entity.getMessagesJson(), InterviewMessage.class));
+        int lastUser = -1;
+        for (int index = messages.size() - 1; index >= 0; index--) {
+            if ("user".equals(messages.get(index).role())) {
+                lastUser = index;
+                break;
+            }
+        }
+        if (lastUser < 0) throw new BusinessException("还没有可撤回的回答");
+
+        if (langGraphClient.available() && !langGraphClient.undo(id)) {
+            throw new BusinessException("面试 Agent 会话撤回失败，请稍后重试");
+        }
+
+        boolean wasCompleted = "COMPLETED".equals(entity.getStatus());
+        List<InterviewMessage> remaining = new ArrayList<>(messages.subList(0, lastUser));
+        if (remaining.isEmpty() || !"assistant".equals(remaining.get(remaining.size() - 1).role())) {
+            throw new BusinessException("面试记录状态异常，无法恢复到上一题");
+        }
+
+        int answered = 0;
+        int scoreSum = 0;
+        for (InterviewMessage message : remaining) {
+            if (!"user".equals(message.role())) continue;
+            answered++;
+            if (message.score() != null) scoreSum += message.score();
+        }
+        entity.setCurrentRound(answered + 1);
+        entity.setTotalRounds(Math.max(entity.getCurrentRound(), entity.getTotalRounds() == null ? TOTAL_ROUNDS : entity.getTotalRounds()));
+        entity.setOverallScore(answered == 0 ? 0 : (int) Math.round(scoreSum / (double) answered));
+        entity.setStatus("IN_PROGRESS");
+        entity.setSkillEvidenceJson(null);
+        entity.setMessagesJson(jsonCodec.write(remaining));
+        entity.setUpdatedAt(LocalDateTime.now());
+        if (wasCompleted) storyBankService.removeForSession(id);
+        return toView(repository.save(entity));
+    }
+
     @Transactional(readOnly = true)
     public List<InterviewSkillEvidence> latestSkillEvidence(Long resumeId, Long jobId) {
         resumeService.get(resumeId);
@@ -200,8 +259,11 @@ public class InterviewService {
 
     @Transactional(readOnly = true)
     public List<InterviewView> list() {
-        return repository.findByDeletedAtIsNullOrderByUpdatedAtDesc().stream()
-                .map(this::toView).toList();
+        Long userId = AuthContext.userIdOrNull();
+        List<InterviewSessionEntity> rows = userId == null || AuthContext.isAdmin()
+                ? repository.findByDeletedAtIsNullOrderByUpdatedAtDesc()
+                : repository.findByUserIdAndDeletedAtIsNullOrderByUpdatedAtDesc(userId);
+        return rows.stream().map(this::toView).toList();
     }
 
     @Transactional
@@ -215,8 +277,11 @@ public class InterviewService {
 
     @Transactional(readOnly = true)
     public List<InterviewView> trash() {
-        return repository.findByDeletedAtIsNotNullOrderByDeletedAtDesc().stream()
-                .map(this::toView).toList();
+        Long userId = AuthContext.userIdOrNull();
+        List<InterviewSessionEntity> rows = userId == null || AuthContext.isAdmin()
+                ? repository.findByDeletedAtIsNotNullOrderByDeletedAtDesc()
+                : repository.findByUserIdAndDeletedAtIsNotNullOrderByDeletedAtDesc(userId);
+        return rows.stream().map(this::toView).toList();
     }
 
     @Transactional
@@ -233,7 +298,10 @@ public class InterviewService {
 
     @Transactional
     public int clearAll() {
-        List<InterviewSessionEntity> sessions = repository.findByDeletedAtIsNullOrderByUpdatedAtDesc();
+        Long userId = AuthContext.userIdOrNull();
+        List<InterviewSessionEntity> sessions = userId == null || AuthContext.isAdmin()
+                ? repository.findByDeletedAtIsNullOrderByUpdatedAtDesc()
+                : repository.findByUserIdAndDeletedAtIsNullOrderByUpdatedAtDesc(userId);
         LocalDateTime now = LocalDateTime.now();
         for (InterviewSessionEntity session : sessions) session.setDeletedAt(now);
         repository.saveAll(sessions);
@@ -242,18 +310,27 @@ public class InterviewService {
 
     @Transactional
     public int emptyTrash() {
-        List<InterviewSessionEntity> sessions = repository.findByDeletedAtIsNotNullOrderByDeletedAtDesc();
+        Long userId = AuthContext.userIdOrNull();
+        List<InterviewSessionEntity> sessions = userId == null || AuthContext.isAdmin()
+                ? repository.findByDeletedAtIsNotNullOrderByDeletedAtDesc()
+                : repository.findByUserIdAndDeletedAtIsNotNullOrderByDeletedAtDesc(userId);
         repository.deleteAll(sessions);
         return sessions.size();
     }
 
     @Transactional(readOnly = true)
     public long count() {
-        return repository.countByDeletedAtIsNull();
+        Long userId = AuthContext.userIdOrNull();
+        return userId == null || AuthContext.isAdmin()
+                ? repository.countByDeletedAtIsNull()
+                : repository.countByUserIdAndDeletedAtIsNull(userId);
     }
 
     private InterviewSessionEntity getEntity(Long id) {
-        return repository.findById(id).orElseThrow(() -> new BusinessException("面试记录不存在：" + id));
+        InterviewSessionEntity entity = repository.findById(id)
+                .orElseThrow(() -> new BusinessException("面试记录不存在：" + id));
+        if (!AuthContext.canAccess(entity.getUserId())) throw new BusinessException("无权访问这条面试记录");
+        return entity;
     }
 
     private String firstQuestion(ResumeView resume, JobView job, String difficulty,
@@ -311,7 +388,7 @@ public class InterviewService {
         String title = safe(job.title()).isBlank() ? "目标岗位" : safe(job.title());
         String city = safe(resume.city()).isBlank() ? "目标城市" : safe(resume.city());
         if (isJuniorDifficulty(difficulty)) {
-            return juniorQuestionForStage(stage, project, role, owned, skill, company, title, city, responsibility);
+            return juniorQuestionForStage(stage, inferJobDirection(job, resume), project, role, owned, skill, company, title, city, responsibility);
         }
         return switch (stage) {
             case "求职动机" -> "你为什么选择“" + title + "”这个方向？结合你目前的技术积累，说明这个岗位最吸引你的一点，以及你希望入职后前六个月学到什么。";
@@ -342,10 +419,10 @@ public class InterviewService {
                 || value.contains("应届") || value.contains("junior");
     }
 
-    private String juniorQuestionForStage(String stage, String project, String role, String owned,
+    private String juniorQuestionForStage(String stage, String direction, String project, String role, String owned,
                                            String skill, String company, String title, String city,
                                            String responsibility) {
-        return switch (stage) {
+        String question = switch (stage) {
             case "求职动机" -> "为什么选择这个技术方向？现在最熟悉和最不熟悉的部分分别是什么？";
             case "个人背景" -> "先用两分钟介绍你的技术方向和一个最相关的项目，重点说你本人负责什么。";
             case "项目概述" -> "介绍一下“" + project + "”解决什么问题、团队有谁、你负责哪一块，以及目前做到什么程度。";
@@ -366,6 +443,51 @@ public class InterviewService {
             case "候选人反问" -> "你有什么问题想反问面试官？可以问岗位职责、团队协作、成长反馈或技术环境。";
             default -> "请结合“" + project + "”和岗位职责“" + responsibility + "”，说明你亲手做过的一部分。";
         };
+        return juniorDirectionalize(question, stage, direction);
+    }
+
+    private String inferJobDirection(JobView job, ResumeView resume) {
+        String title = safe(job.title()).toLowerCase(Locale.ROOT);
+        String combined = title + " " + String.join(" ", job.skills()).toLowerCase(Locale.ROOT)
+                + " " + safe(resume.targetRole()).toLowerCase(Locale.ROOT);
+        if (containsAny(title, "前端", "frontend", "web前端")) return "前端";
+        if (containsAny(title, "测试", "qa", "测开", "自动化测试")) return "测试";
+        if (containsAny(title, "运维", "devops", "sre")) return "运维";
+        if (containsAny(title, "数据", "算法", "机器学习", "大模型", "ai", "llm")) return "数据/AI";
+        if (containsAny(title, "嵌入式", "单片机", "c++", "驱动", "固件")) return "嵌入式/C++";
+        if (containsAny(title, "安全", "渗透", "漏洞", "攻防")) return "网络安全";
+        if (containsAny(title, "golang", "go开发", "go后端")) return "Go后端";
+        if (containsAny(title, "java", "后端", "backend")) return "Java后端";
+        if (containsAny(combined, "vue", "react", "javascript", "typescript", "css", "html")) return "前端";
+        if (containsAny(combined, "selenium", "接口测试", "自动化测试")) return "测试";
+        if (containsAny(combined, "docker", "kubernetes", "nginx", "devops")) return "运维";
+        if (containsAny(combined, "pytorch", "tensorflow", "机器学习", "深度学习")) return "数据/AI";
+        if (containsAny(combined, "c++", "stm32", "rtos", "单片机")) return "嵌入式/C++";
+        if (containsAny(combined, "owasp", "渗透", "sql注入", "漏洞")) return "网络安全";
+        if (containsAny(combined, "golang", " go ", "go语言")) return "Go后端";
+        return "Java后端";
+    }
+
+    private String juniorDirectionalize(String question, String stage, String direction) {
+        if (!Set.of("项目职责", "业务链路", "技术实现", "基础概念", "故障与取舍", "故障与边界",
+                "方案取舍", "技术判断", "结果验证", "证据补强", "迁移验证").contains(stage)) return question;
+        String hint = switch (direction) {
+            case "前端" -> "请围绕页面状态、组件、接口请求、异常渲染和浏览器验证说明。";
+            case "测试" -> "请围绕测试用例、缺陷复现、断言和回归验证说明。";
+            case "运维" -> "请围绕部署、端口、配置、日志、监控和回滚说明。";
+            case "数据/AI" -> "请围绕数据清洗、指标口径、模型训练和结果评估说明。";
+            case "嵌入式/C++" -> "请围绕输入输出、内存资源、硬件联调和日志验证说明。";
+            case "网络安全" -> "请围绕授权范围、漏洞复现、影响判断和修复复测说明。";
+            case "Go后端" -> "请围绕 Handler、goroutine、channel、超时和并发验证说明。";
+            default -> "请围绕 Controller、Service、Mapper、事务、SQL 和日志排查说明。";
+        };
+        return question + " " + hint;
+    }
+
+    private boolean containsAny(String text, String... terms) {
+        String value = safe(text).toLowerCase(Locale.ROOT);
+        for (String term : terms) if (value.contains(term.toLowerCase(Locale.ROOT))) return true;
+        return false;
     }
 
     private String storedMode(String mode) {
@@ -583,17 +705,31 @@ public class InterviewService {
     }
 
     private InterviewView toView(InterviewSessionEntity entity) {
+        int overallScore = entity.getOverallScore() == null ? 0 : entity.getOverallScore();
+        String scoringVersion = entity.getScoringVersion();
+        boolean scoreComparable = scoringVersion != null && !scoringVersion.startsWith("LEGACY");
+        String effectiveVersion = scoringVersion == null ? "LEGACY_PRE_2026_11" : scoringVersion;
         return new InterviewView(entity.getId(), entity.getResumeId(), entity.getJobId(), entity.getJobTitle(),
                 storedMode(entity.getInterviewMode()),
                 entity.getDifficulty(), entity.getStatus(),
                 entity.getCurrentRound() == null ? 0 : entity.getCurrentRound(),
                 entity.getTotalRounds() == null ? TOTAL_ROUNDS : entity.getTotalRounds(),
-                entity.getOverallScore() == null ? 0 : entity.getOverallScore(),
+                overallScore, effectiveVersion, entity.getLegacyOverallScore(), scoreComparable,
+                scoreBand(overallScore),
                 jsonCodec.readList(entity.getMessagesJson(), InterviewMessage.class),
                 jsonCodec.readList(entity.getSkillEvidenceJson(), InterviewSkillEvidence.class),
                 readProjectEvidence(entity, null),
                 readJobBlueprint(entity),
+                entity.getDataKind() == null ? "LEGACY" : entity.getDataKind(),
                 entity.getStartedAt(), entity.getUpdatedAt(), entity.getDeletedAt());
+    }
+
+    private String scoreBand(int score) {
+        if (score >= 85) return "证据充分";
+        if (score >= 75) return "符合初级基本要求";
+        if (score >= 65) return "有培养潜力";
+        if (score >= 55) return "方向相关但证据不足";
+        return "需要系统补强";
     }
 
     private InterviewProjectEvidence projectEvidence(InterviewProjectEvidence supplied, ResumeView resume) {

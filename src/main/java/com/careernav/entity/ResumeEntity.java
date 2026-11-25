@@ -8,6 +8,8 @@ import java.time.LocalDateTime;
 public class ResumeEntity {
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+    @Column(name = "user_id") private Long userId;
+    @Column(name = "data_kind", length = 20) private String dataKind;
     @Column(nullable = false, length = 80) private String ownerName;
     @Column(nullable = false, length = 120) private String targetRole;
     private String city;
@@ -36,6 +38,8 @@ public class ResumeEntity {
     private LocalDateTime updatedAt;
 
     public Long getId() { return id; } public void setId(Long id) { this.id = id; }
+    public String getDataKind() { return dataKind; } public void setDataKind(String v) { dataKind = v; }
+    public Long getUserId() { return userId; } public void setUserId(Long v) { userId = v; }
     public String getOwnerName() { return ownerName; } public void setOwnerName(String v) { ownerName = v; }
     public String getTargetRole() { return targetRole; } public void setTargetRole(String v) { targetRole = v; }
     public String getCity() { return city; } public void setCity(String v) { city = v; }

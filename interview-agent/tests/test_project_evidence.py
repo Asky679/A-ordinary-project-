@@ -157,6 +157,27 @@ class ProjectEvidenceQuestionTests(unittest.TestCase):
         self.assertIn("接口截图和测试记录", questions[6])
         self.assertIn("反问", questions[7])
 
+    def test_adaptive_route_applies_to_non_junior_interviews(self):
+        agent = InterviewAgent.__new__(InterviewAgent)
+        agent.agent = None
+        agent.llm_enabled = False
+        agent.checkpointer = None
+        resume = {
+            "targetRole": "Java后端开发", "city": "长沙", "skills": ["Java", "MySQL"],
+            "projects": [{"name": "校园二手交易平台", "role": "后端开发", "description": "订单接口"}],
+        }
+        job = {"title": "Java后端开发", "company": "测试公司", "city": "长沙",
+               "skills": ["Java", "MySQL"], "jobRequirements": "负责接口设计、故障处理和优化"}
+        evidence = {"projectName": "校园二手交易平台", "role": "后端开发",
+                    "evidenceDetails": {"ownedModules": "订单接口", "testCoverage": "正常和异常用例"}}
+        result = agent.start("adaptive-mid", resume, job, "中级 · 标准", "技术面", evidence, {}, [])
+        self.assertLessEqual(result["targetRounds"], 10)
+        self.assertEqual(result["round"], 1)
+        snapshot = agent.snapshot("adaptive-mid")
+        self.assertNotEqual(snapshot["plan"], ["个人背景", "项目职责", "业务链路", "技术实现", "故障与边界", "方案取舍", "结果验证", "候选人反问"])
+        self.assertEqual(snapshot["requiredStages"], ["个人背景", "项目职责", "业务链路", "技术实现", "结果验证", "候选人反问"])
+
+
 
 if __name__ == "__main__":
     unittest.main()

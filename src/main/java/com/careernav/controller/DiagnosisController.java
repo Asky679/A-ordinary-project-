@@ -20,6 +20,7 @@ public class DiagnosisController {
         this.jobAgent = jobAgent;
         this.evidenceService = evidenceService;
     }@GetMapping public ApiResponse<List<DiagnosisReport>> list(@RequestParam(required=false)Long resumeId){return ApiResponse.ok(service.list(resumeId));}@PostMapping public ApiResponse<DiagnosisReport> diagnose(@RequestBody com.careernav.domain.ApiModels.DiagnosisRequest request){
+        service.assertResumeAccess(request.resumeId());
         if (request.jobId() == null) throw new BusinessException("请选择目标岗位后再进行诊断");
         if (evidenceService.latestForResumeAndJob(request.resumeId(), request.jobId()).isEmpty()) {
             throw new BusinessException("请先完成该岗位的八轮项目面试，再生成简历诊断分");
@@ -29,4 +30,4 @@ public class DiagnosisController {
     /** 简历 -> 岗位推荐 Agent：自主检索 + 算法精排 + 反思重试，返回推荐岗位与技能缺口。 */
     /** 纯规则诊断（供 LangGraph 诊断 Agent 作为工具调用，不触发 Agent）。 */
     @PostMapping("/rule")public ApiResponse<DiagnosisReport> rule(@RequestBody com.careernav.domain.ApiModels.DiagnosisRequest request){return ApiResponse.ok("规则诊断完成",service.previewRuleBased(request.resumeId(),request.jobId()));}
-    @PostMapping("/agent")public ApiResponse<JsonNode> agentRecommend(@RequestParam Long resumeId,@RequestParam(defaultValue="")String city,@RequestParam(defaultValue="")String excludedCities,@RequestParam(defaultValue="8")int limit){JsonNode result=jobAgent.recommend(resumeId,city,excludedCities,limit);if(result==null){throw new BusinessException("岗位推荐 Agent 当前不可用，请确认 LangGraph 服务（8001）已启动");}return ApiResponse.ok("岗位推荐 Agent 执行完成",result);}}
+    @PostMapping("/agent")public ApiResponse<JsonNode> agentRecommend(@RequestParam Long resumeId,@RequestParam(defaultValue="")String city,@RequestParam(defaultValue="")String excludedCities,@RequestParam(defaultValue="8")int limit){service.assertResumeAccess(resumeId);JsonNode result=jobAgent.recommend(resumeId,city,excludedCities,limit);if(result==null){throw new BusinessException("岗位推荐 Agent 当前不可用，请确认 LangGraph 服务（8001）已启动");}return ApiResponse.ok("岗位推荐 Agent 执行完成",result);}}

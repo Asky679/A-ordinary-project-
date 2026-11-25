@@ -1,5 +1,6 @@
 package com.careernav.service;
 
+import com.careernav.auth.AuthContext;
 import com.careernav.domain.ApiModels.*;
 import com.careernav.entity.DiagnosisReportEntity;
 import com.careernav.repository.DiagnosisReportRepository;
@@ -79,7 +80,7 @@ public class DiagnosisService {
                 base.matchedKeywords(), base.missingKeywords(), suggestions,
                 enrichment.toolCalls(), base.learningPlan(),
                 base.jobMatchSource(), base.ruleMatchScore(), base.agentMatchScore(), base.agentMatchBreakdown(),
-                base.resumeUpdatedAt(), base.createdAt());
+                base.resumeUpdatedAt(), base.createdAt(), base.dataKind());
 
         repository.findById(base.id()).ifPresent(entity -> {
             entity.setReportJson(jsonCodec.write(enriched));
@@ -101,6 +102,8 @@ public class DiagnosisService {
 
     private DiagnosisReport diagnoseRuleInternal(Long resumeId, Long jobId, boolean persist) {
         ResumeView resume = resumeService.get(resumeId);
+        var owner = resumeService.getEntity(resumeId);
+        String dataKind = owner.getDataKind() == null ? "LEGACY" : owner.getDataKind();
         JobView job = jobId == null ? null : jobService.get(jobId);
         JobRecommendation jobMatch = jobId == null ? null : jobService.evaluate(resume, jobId);
         AgentMatchItem targetMatch = jobId == null ? null : jobService.targetMatch(resume, jobId);
@@ -168,10 +171,12 @@ public class DiagnosisService {
                 qualityDimensions, effectiveMatchBreakdown, strengths,
                 List.copyOf(matched), List.copyOf(missing), suggestions, List.of(), learningPlan,
                 jobMatchSource, ruleMatchScore, agentMatchScore, agentMatchBreakdown,
-                resume.updatedAt(), LocalDateTime.now());
+                resume.updatedAt(), LocalDateTime.now(), dataKind);
         if (!persist) return draft;
 
         DiagnosisReportEntity entity = new DiagnosisReportEntity();
+        entity.setUserId(owner.getUserId());
+        entity.setDataKind(dataKind);
         entity.setResumeId(resume.id());
         entity.setJobId(jobId);
         entity.setTargetRole(targetRole);
@@ -187,33 +192,75 @@ public class DiagnosisService {
                 draft.level(), draft.summary(), draft.dimensions(), draft.jobMatchBreakdown(), draft.strengths(),
                 draft.matchedKeywords(), draft.missingKeywords(), draft.suggestions(), draft.agentTrace(), draft.learningPlan(),
                 draft.jobMatchSource(), draft.ruleMatchScore(), draft.agentMatchScore(), draft.agentMatchBreakdown(),
-                draft.resumeUpdatedAt(), draft.createdAt());
+                draft.resumeUpdatedAt(), draft.createdAt(), draft.dataKind());
         entity.setReportJson(jsonCodec.write(report));
         repository.save(entity);
         return report;
     }
 
     @Transactional(readOnly = true)
+    public void assertResumeAccess(Long resumeId) {
+        resumeService.get(resumeId);
+    }
+
+    @Transactional(readOnly = true)
     public DiagnosisReport latest(Long resumeId) {
-        return repository.findFirstByResumeIdOrderByCreatedAtDesc(resumeId).map(entity -> {
+        resumeService.get(resumeId);
+        Long userId = AuthContext.userIdOrNull();
+        var found = userId == null || AuthContext.isAdmin()
+                ? repository.findFirstByResumeIdOrderByCreatedAtDesc(resumeId)
+                : repository.findFirstByUserIdAndResumeIdOrderByCreatedAtDesc(userId, resumeId);
+        return found.map(entity -> {
             DiagnosisReport report = jsonCodec.read(entity.getReportJson(), DiagnosisReport.class);
-            return isCurrent(report) ? report : null;
+            return isCurrent(report) ? withEntityDataKind(report, entity) : null;
         }).orElse(null);
     }
 
     @Transactional(readOnly = true)
     public List<DiagnosisReport> list(Long resumeId) {
-        return repository.findAll().stream()
+        Long userId = AuthContext.userIdOrNull();
+        if (resumeId != null) resumeService.get(resumeId);
+        List<DiagnosisReportEntity> rows;
+        if (userId == null || AuthContext.isAdmin()) {
+            rows = repository.findAll();
+        } else if (resumeId == null) {
+            rows = repository.findByUserIdOrderByCreatedAtDesc(userId);
+        } else {
+            rows = repository.findByUserIdAndResumeIdOrderByCreatedAtDesc(userId, resumeId);
+        }
+        return rows.stream()
                 .filter(entity -> resumeId == null || resumeId.equals(entity.getResumeId()))
                 .sorted((a, b) -> b.getCreatedAt().compareTo(a.getCreatedAt()))
-                .map(entity -> jsonCodec.read(entity.getReportJson(), DiagnosisReport.class))
+                .map(entity -> withEntityDataKind(
+                        jsonCodec.read(entity.getReportJson(), DiagnosisReport.class), entity))
                 .filter(Objects::nonNull)
                 .toList();
     }
 
+    /**
+     * Older report JSON predates the dataKind field. The entity column is the
+     * source of truth, so expose it to the UI even for legacy serialized rows.
+     */
+    private DiagnosisReport withEntityDataKind(DiagnosisReport report, DiagnosisReportEntity entity) {
+        if (report == null) return null;
+        String dataKind = entity.getDataKind() == null ? "LEGACY" : entity.getDataKind();
+        if (dataKind.equals(report.dataKind())) return report;
+        return new DiagnosisReport(report.id(), report.resumeId(), report.jobId(), report.targetRole(),
+                report.overallScore(), report.resumeQualityScore(), report.jobMatchScore(),
+                report.jobMatchLevel(), report.level(), report.summary(), report.dimensions(),
+                report.jobMatchBreakdown(), report.strengths(), report.matchedKeywords(),
+                report.missingKeywords(), report.suggestions(), report.agentTrace(), report.learningPlan(),
+                report.jobMatchSource(), report.ruleMatchScore(), report.agentMatchScore(),
+                report.agentMatchBreakdown(), report.resumeUpdatedAt(), report.createdAt(), dataKind);
+    }
+
     @Transactional(readOnly = true)
     public int averageScore() {
-        return (int) Math.round(repository.findAll().stream()
+        Long userId = AuthContext.userIdOrNull();
+        List<DiagnosisReportEntity> rows = userId == null || AuthContext.isAdmin()
+                ? repository.findAll()
+                : repository.findByUserIdOrderByCreatedAtDesc(userId);
+        return (int) Math.round(rows.stream()
                 .map(entity -> jsonCodec.read(entity.getReportJson(), DiagnosisReport.class))
                 .filter(this::isCurrent)
                 .mapToInt(DiagnosisReport::overallScore)
@@ -222,7 +269,8 @@ public class DiagnosisService {
 
     @Transactional(readOnly = true)
     public long count() {
-        return repository.count();
+        Long userId = AuthContext.userIdOrNull();
+        return userId == null || AuthContext.isAdmin() ? repository.count() : repository.countByUserId(userId);
     }
 
     public Set<String> fallbackSkills(String role) {

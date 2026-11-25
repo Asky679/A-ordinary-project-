@@ -3,6 +3,7 @@ import { request } from './api.js';
 import { $, $$, esc, options, empty, error, link, task, chips } from './ui.js';
 import { learning, renderReport } from './practice.js';
 import { postingPath } from './job-sky-layout.js';
+import { filterDemo } from './auth.js';
 
 const stages = ['读取简历','匹配岗位','创建练习','整理建议','生成学习路线'];
 
@@ -36,7 +37,7 @@ export async function workflow(root,signal) {
     request('/resumes',{signal}),request('/jobs?limit=200',{signal}),request('/agent/status',{signal})
   ]);
   if (signal.aborted) return;
-  const items = resumes.status==='fulfilled' ? resumes.value : [];
+  const items = resumes.status==='fulfilled' ? filterDemo(resumes.value) : [];
   form.elements.resumeId.innerHTML = options(items,'',item=>item.ownerName+' · '+item.targetRole);
   if (jobs.status==='fulfilled') form.elements.jobId.insertAdjacentHTML('beforeend',options(jobs.value,'',item=>item.title+' · '+item.company));
   $('.workflow-status',form).textContent = status.status==='fulfilled' ?

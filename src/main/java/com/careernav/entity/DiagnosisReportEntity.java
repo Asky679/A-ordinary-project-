@@ -8,11 +8,15 @@ import java.time.LocalDateTime;
 public class DiagnosisReportEntity {
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+    @Column(name = "user_id") private Long userId;
+    @Column(name = "data_kind", length = 20) private String dataKind;
     private Long resumeId; private Long jobId; private String targetRole; private Integer overallScore; private Integer resumeQualityScore; private Integer jobMatchScore;
     @Column(columnDefinition = "text") private String reportJson;
     private LocalDateTime createdAt;
 
     public Long getId() { return id; } public void setId(Long v) { id = v; }
+    public String getDataKind() { return dataKind; } public void setDataKind(String v) { dataKind = v; }
+    public Long getUserId() { return userId; } public void setUserId(Long v) { userId = v; }
     public Long getResumeId() { return resumeId; } public void setResumeId(Long v) { resumeId = v; }
     public Long getJobId() { return jobId; } public void setJobId(Long v) { jobId = v; }
     public String getTargetRole() { return targetRole; } public void setTargetRole(String v) { targetRole = v; }

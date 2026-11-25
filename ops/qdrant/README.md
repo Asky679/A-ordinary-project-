@@ -14,7 +14,7 @@ gRPC      : 127.0.0.1:6334
 
 | 集合 | 向量数 | 维度 | 距离 | 用途 |
 | --- | ---: | ---: | --- | --- |
-| `careernav_jobs` | 4,110 | 256 | Cosine | 岗位语义检索 |
+| `careernav_jobs` | 9,189 | 256 | Cosine | 岗位语义检索 |
 | `careernav_interview_questions` | 1,508 | 256 | Cosine | 面试题库检索 |
 
 两个集合都是 `on_disk_payload: true`。`indexed_vectors_count` 为 0 是正常现象：

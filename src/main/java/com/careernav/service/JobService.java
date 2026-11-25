@@ -157,6 +157,26 @@ public class JobService {
         return new CityJobPage(targetCity, total, safePage, safeSize, items);
     }
 
+    /** 普通岗位浏览：无简历评分，返回全量 ACTIVE 查询结果的服务器分页。 */
+    @Transactional(readOnly = true)
+    public JobPage browse(String keyword, String city, String sort, int page, int size, JobFilter filter) {
+        int safePage = Math.max(0, page);
+        int safeSize = Math.max(1, Math.min(size, 100));
+        JobFilter safeFilter = filter == null ? JobFilter.empty() : filter;
+        String targetCity = safe(city);
+        List<JobEntity> candidates = repository.findRecommendationCandidates(targetCity).stream()
+                .filter(this::isVisible)
+                .filter(job -> matchesKeyword(job, keyword))
+                .filter(job -> matchesFilter(job, safeFilter))
+                .sorted(Comparator.comparing(this::latestJobTime,
+                        Comparator.nullsLast(Comparator.reverseOrder())))
+                .toList();
+        int from = Math.min(candidates.size(), safePage * safeSize);
+        int to = Math.min(candidates.size(), from + safeSize);
+        return new JobPage(safe(keyword), targetCity, candidates.size(), safePage, safeSize,
+                candidates.subList(from, to).stream().map(this::toView).toList());
+    }
+
     private boolean matchesKeyword(JobEntity job, String keyword) {
         String key = safe(keyword).toLowerCase(Locale.ROOT);
         if (key.isBlank()) return true;

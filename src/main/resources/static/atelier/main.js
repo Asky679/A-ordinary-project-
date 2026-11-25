@@ -8,6 +8,7 @@ import { getSkill, skillAtlas, skillDetail } from './skill-atlas.js';
 import { interview, growth } from './practice.js';
 import { workflow } from './workflow.js';
 import { project } from './project.js';
+import { initAuth } from './auth.js';
 
 const root = $('#content');
 const mapHome = $('.map-home');
@@ -275,4 +276,5 @@ document.addEventListener('pointerdown',event => {
   if (quickNav.open && !quickNav.contains(event.target)) quickNav.open = false;
 });
 $('.skip').addEventListener('click',event=>{event.preventDefault();root.focus();});
-navigate();
+window.addEventListener('careernav:demo-filter-changed', () => navigate());
+initAuth(() => navigate());

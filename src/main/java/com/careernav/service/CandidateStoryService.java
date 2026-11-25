@@ -1,5 +1,6 @@
 package com.careernav.service;
 
+import com.careernav.auth.AuthContext;
 import com.careernav.common.BusinessException;
 import com.careernav.domain.ApiModels.CandidateStoryView;
 import com.careernav.domain.ApiModels.InterviewMessage;
@@ -48,16 +49,14 @@ public class CandidateStoryService {
     @Transactional(readOnly = true)
     public List<CandidateStoryView> list(Long resumeId) {
         if (resumeId == null) return List.of();
-        return repository.findByResumeIdAndDeletedAtIsNullOrderByUpdatedAtDesc(resumeId).stream()
-                .map(this::view).toList();
+        return activeStories(resumeId).stream().map(this::view).toList();
     }
 
     /** 把最近故事带入下一场面试，并记录使用次数。 */
     @Transactional
     public List<CandidateStoryView> loadForInterview(Long resumeId) {
         if (resumeId == null) return List.of();
-        List<CandidateStoryEntity> stories = new ArrayList<>(
-                repository.findTop12ByResumeIdAndDeletedAtIsNullOrderByUpdatedAtDesc(resumeId));
+        List<CandidateStoryEntity> stories = new ArrayList<>(topStories(resumeId));
         if (stories.isEmpty()) return List.of();
         LocalDateTime now = LocalDateTime.now();
         for (CandidateStoryEntity story : stories) {
@@ -84,8 +83,11 @@ public class CandidateStoryService {
         if (resumeId == null) throw new BusinessException("请选择简历");
         int max = Math.max(1, Math.min(limit <= 0 ? 6 : limit, 20));
         int processed = 0;
-        List<InterviewSessionEntity> sessions =
-                interviewRepository.findByResumeIdAndStatusAndDeletedAtIsNullOrderByUpdatedAtDesc(resumeId, "COMPLETED");
+        Long userId = AuthContext.userIdOrNull();
+        List<InterviewSessionEntity> sessions = userId == null || AuthContext.isAdmin()
+                ? interviewRepository.findByResumeIdAndStatusAndDeletedAtIsNullOrderByUpdatedAtDesc(resumeId, "COMPLETED")
+                : interviewRepository.findByUserIdAndResumeIdAndStatusAndDeletedAtIsNullOrderByUpdatedAtDesc(
+                        userId, resumeId, "COMPLETED");
         for (InterviewSessionEntity session : sessions) {
             if (processed >= max) break;
             if (repository.existsBySourceSessionIdAndDeletedAtIsNull(session.getId())) continue;
@@ -107,6 +109,7 @@ public class CandidateStoryService {
             if (sessionId == null) continue;
             InterviewSessionEntity session = interviewRepository.findById(sessionId)
                     .orElseThrow(() -> new BusinessException("面试记录不存在：" + sessionId));
+            if (!AuthContext.canAccess(session.getUserId())) throw new BusinessException("无权使用这条面试记录");
             if (!resumeId.equals(session.getResumeId())) {
                 throw new BusinessException("面试记录不属于当前简历：" + sessionId);
             }
@@ -121,9 +124,23 @@ public class CandidateStoryService {
         return list(resumeId);
     }
     @Transactional
+    public int removeForSession(Long sessionId) {
+        List<CandidateStoryEntity> stories = repository.findBySourceSessionId(sessionId);
+        LocalDateTime now = LocalDateTime.now();
+        int removed = 0;
+        for (CandidateStoryEntity story : stories) {
+            if (story.getDeletedAt() != null) continue;
+            story.setDeletedAt(now);
+            story.setUpdatedAt(now);
+            removed++;
+        }
+        repository.saveAll(stories);
+        return removed;
+    }
+
+    @Transactional
     public void delete(Long id) {
-        CandidateStoryEntity story = repository.findById(id)
-                .orElseThrow(() -> new BusinessException("故事不存在：" + id));
+        CandidateStoryEntity story = ownedStory(id);
         if (story.getDeletedAt() == null) {
             story.setDeletedAt(LocalDateTime.now());
             repository.save(story);
@@ -133,29 +150,30 @@ public class CandidateStoryService {
     @Transactional(readOnly = true)
     public List<CandidateStoryView> trash(Long resumeId) {
         if (resumeId == null) return List.of();
-        return repository.findByResumeIdAndDeletedAtIsNotNullOrderByDeletedAtDesc(resumeId)
-                .stream().map(this::view).toList();
+        Long userId = AuthContext.userIdOrNull();
+        List<CandidateStoryEntity> stories = userId == null || AuthContext.isAdmin()
+                ? repository.findByResumeIdAndDeletedAtIsNotNullOrderByDeletedAtDesc(resumeId)
+                : repository.findByUserIdAndResumeIdAndDeletedAtIsNotNullOrderByDeletedAtDesc(userId, resumeId);
+        return stories.stream().map(this::view).toList();
     }
 
     @Transactional
     public void restore(Long id) {
-        CandidateStoryEntity story = repository.findById(id)
-                .orElseThrow(() -> new BusinessException("故事不存在：" + id));
+        CandidateStoryEntity story = ownedStory(id);
         story.setDeletedAt(null);
         repository.save(story);
     }
 
     @Transactional
     public void permanentDelete(Long id) {
-        CandidateStoryEntity story = repository.findById(id)
-                .orElseThrow(() -> new BusinessException("故事不存在：" + id));
+        CandidateStoryEntity story = ownedStory(id);
         repository.delete(story);
     }
 
     @Transactional
     public int clear(Long resumeId) {
         if (resumeId == null) return 0;
-        List<CandidateStoryEntity> stories = repository.findByResumeIdAndDeletedAtIsNullOrderByUpdatedAtDesc(resumeId);
+        List<CandidateStoryEntity> stories = activeStories(resumeId);
         LocalDateTime now = LocalDateTime.now();
         for (CandidateStoryEntity story : stories) story.setDeletedAt(now);
         repository.saveAll(stories);
@@ -165,7 +183,10 @@ public class CandidateStoryService {
     @Transactional
     public int emptyTrash(Long resumeId) {
         if (resumeId == null) return 0;
-        List<CandidateStoryEntity> stories = repository.findByResumeIdAndDeletedAtIsNotNullOrderByDeletedAtDesc(resumeId);
+        Long userId = AuthContext.userIdOrNull();
+        List<CandidateStoryEntity> stories = userId == null || AuthContext.isAdmin()
+                ? repository.findByResumeIdAndDeletedAtIsNotNullOrderByDeletedAtDesc(resumeId)
+                : repository.findByUserIdAndResumeIdAndDeletedAtIsNotNullOrderByDeletedAtDesc(userId, resumeId);
         repository.deleteAll(stories);
         return stories.size();
     }
@@ -241,9 +262,14 @@ public class CandidateStoryService {
             String project = first(draft.projectName(), "");
             String action = clip(safe(draft.action()), 5000);
             String fingerprint = fingerprint(session.getResumeId(), project, title, action);
-            Optional<CandidateStoryEntity> existing =
-                    repository.findFirstByResumeIdAndFingerprintAndDeletedAtIsNull(session.getResumeId(), fingerprint);
+            Long userId = session.getUserId();
+            Optional<CandidateStoryEntity> existing = userId == null
+                    ? repository.findFirstByResumeIdAndFingerprintAndDeletedAtIsNull(session.getResumeId(), fingerprint)
+                    : repository.findFirstByUserIdAndResumeIdAndFingerprintAndDeletedAtIsNull(
+                            userId, session.getResumeId(), fingerprint);
             CandidateStoryEntity story = existing.orElseGet(CandidateStoryEntity::new);
+            story.setUserId(userId);
+            story.setDataKind(session.getDataKind());
             story.setResumeId(session.getResumeId());
             story.setJobId(session.getJobId());
             List<Long> sourceIds = sourceSessionIds(story);
@@ -272,6 +298,27 @@ public class CandidateStoryService {
         }
     }
 
+    private List<CandidateStoryEntity> activeStories(Long resumeId) {
+        Long userId = AuthContext.userIdOrNull();
+        return userId == null || AuthContext.isAdmin()
+                ? repository.findByResumeIdAndDeletedAtIsNullOrderByUpdatedAtDesc(resumeId)
+                : repository.findByUserIdAndResumeIdAndDeletedAtIsNullOrderByUpdatedAtDesc(userId, resumeId);
+    }
+
+    private List<CandidateStoryEntity> topStories(Long resumeId) {
+        Long userId = AuthContext.userIdOrNull();
+        return userId == null || AuthContext.isAdmin()
+                ? repository.findTop12ByResumeIdAndDeletedAtIsNullOrderByUpdatedAtDesc(resumeId)
+                : repository.findTop12ByUserIdAndResumeIdAndDeletedAtIsNullOrderByUpdatedAtDesc(userId, resumeId);
+    }
+
+    private CandidateStoryEntity ownedStory(Long id) {
+        CandidateStoryEntity story = repository.findById(id)
+                .orElseThrow(() -> new BusinessException("故事不存在：" + id));
+        if (!AuthContext.canAccess(story.getUserId())) throw new BusinessException("无权访问这个故事");
+        return story;
+    }
+
     private CandidateStoryView view(CandidateStoryEntity story) {
         return new CandidateStoryView(
                 story.getId(), story.getResumeId(), story.getJobId(), story.getSourceSessionId(),
@@ -280,7 +327,8 @@ public class CandidateStoryService {
                 safe(story.getResult()), safe(story.getReflection()),
                 readCompetencies(story.getCompetenciesJson()), safe(story.getEvidence()),
                 story.getConfidence(), story.getUsageCount() == null ? 0 : story.getUsageCount(),
-                story.getLastUsedAt(), story.getCreatedAt(), story.getUpdatedAt(), story.getDeletedAt());
+                story.getLastUsedAt(), story.getCreatedAt(), story.getUpdatedAt(), story.getDeletedAt(),
+                story.getDataKind() == null ? "LEGACY" : story.getDataKind());
     }
 
     private List<Long> sourceSessionIds(CandidateStoryEntity story) {

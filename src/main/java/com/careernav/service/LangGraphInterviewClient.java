@@ -96,6 +96,17 @@ public class LangGraphInterviewClient {
         }
     }
 
+    public boolean undo(Long sessionId) {
+        if (!enabled) return false;
+        try {
+            JsonNode response = post("/v1/interviews/" + sessionId + "/undo", Map.of());
+            return response != null && response.path("undone").asBoolean(false);
+        } catch (Exception exception) {
+            log.warn("LangGraph undo failed: {}", exception.getMessage());
+            return false;
+        }
+    }
+
     private Map<String, Object> resumeContext(ResumeView resume) {
         Map<String, Object> context = new LinkedHashMap<>();
         context.put("targetRole", resume.targetRole());
@@ -133,15 +144,19 @@ public class LangGraphInterviewClient {
         response.path("toolCalls").forEach(item -> tools.add(item.asText()));
         List<String> memory = new ArrayList<>();
         response.path("memory").forEach(item -> memory.add(item.asText()));
+        List<String> route = new ArrayList<>();
+        response.path("route").forEach(item -> route.add(item.asText()));
         return new AgentTurn(
                 response.path("question").asText(""),
                 response.path("score").isNumber() ? response.path("score").asInt() : null,
                 response.path("feedback").asText(""),
                 response.path("done").asBoolean(false),
                 response.path("round").asInt(1),
+                response.path("targetRounds").asInt(10),
                 response.path("stage").asText(""),
                 tools,
-                memory
+                memory,
+                route
         );
     }
 
@@ -168,5 +183,6 @@ public class LangGraphInterviewClient {
     }
 
     public record AgentTurn(String question, Integer score, String feedback, boolean done,
-                            int round, String stage, List<String> toolCalls, List<String> memory) {}
+                            int round, int targetRounds, String stage, List<String> toolCalls,
+                            List<String> memory, List<String> route) {}
 }

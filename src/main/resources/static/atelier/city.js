@@ -1,6 +1,7 @@
 import { $, $$, routes } from './ui.js';
 import { request } from './api.js';
 import { animateCanvas } from './scene-motion.js';
+import { filterDemo } from './auth.js';
 
 const landmarks = [
   { id:'studio', task:'整理与优化简历', color:'#dce5bb', x:33.6, y:35.6, width:12, height:25 },
@@ -71,7 +72,7 @@ async function nextStep(signal) {
   const [interviews,resumes] = await Promise.allSettled([
     request('/interviews',{signal}), request('/resumes',{signal})
   ]);
-  const sessions = interviews.status === 'fulfilled' ? interviews.value : [];
+  const sessions = interviews.status === 'fulfilled' ? filterDemo(interviews.value) : [];
   const unfinished = sessions.find(item => item.status === 'IN_PROGRESS');
   if (unfinished) return {
     place:'interview', href:'#interview?work=1&session='+encodeURIComponent(unfinished.id)
@@ -83,7 +84,7 @@ async function nextStep(signal) {
     place:'growth', href:'#growth?work=1&session='+encodeURIComponent(completed.id),
     label:'回看最近的面试', detail:completed.jobTitle
   };
-  if (resumes.status === 'fulfilled' && resumes.value.length) {
+  if (resumes.status === 'fulfilled' && filterDemo(resumes.value).length) {
     return {place:'jobs', href:'#jobs', label:'探索职业方向'};
   }
   return null;

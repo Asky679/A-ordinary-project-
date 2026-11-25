@@ -135,6 +135,7 @@ public class ResumeVersionService {
 
     // ---------------------------------------------------------------- 内部
     private ResumeVersionEntity find(Long resumeId, Long versionId) {
+        resumeService.get(resumeId);
         return versions.findByIdAndResumeId(versionId, resumeId)
                 .orElseThrow(() -> new BusinessException("版本不存在：" + versionId));
     }

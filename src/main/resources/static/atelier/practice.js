@@ -1,11 +1,22 @@
 import { bindBlueprint } from './interview-blueprint.js';
 import { request } from './api.js';
+import { filterDemo, dataKindLabel } from './auth.js';
 import { $, $$, esc, date, options, empty, link, task, notify } from './ui.js';
 
 const answerDrafts = new Map();
 const advisoryFeedback = value => String(value || '')
   .replace(/(?:本轮)?(?:得分|评分)\s*[：:]?\s*\d+(?:\.\d+)?\s*分?[。；;，,\s]*/gi, '')
   .trim();
+
+
+function scoreVersionLabel(item) {
+  if (!item || item.status !== 'COMPLETED') return '';
+  if (!item.scoreComparable) return `旧评分规则 · ${item.scoreBand || '不可跨版本比较'}`;
+  if (item.legacyOverallScore != null) {
+    return `新规则重算 · 原 ${item.legacyOverallScore} → 现 ${item.overallScore} 分`;
+  }
+  return `当前评分规则 · ${item.overallScore} 分`;
+}
 
 
 const guideRoleOptions = [
@@ -22,13 +33,7 @@ const guideFocusOptions = [
   ['结果验证与证据','结果验证与证据',false]
 ];
 const guideProofOptions = ['项目文档','接口截图','测试记录','部署记录','暂时没有'];
-const interviewModePlans = {
-  '综合面':['求职动机','项目职责','业务链路','技术实现','故障与取舍','团队协作','失败与学习','候选人反问'],
-  '技术面':['个人背景','项目职责','业务链路','技术实现','故障与边界','方案取舍','结果验证','候选人反问'],
-  'HR面':['个人背景','求职动机','项目概述','团队协作','冲突处理','岗位意愿','职业规划','候选人反问'],
-  '主管面':['个人背景','项目职责','业务链路','技术判断','故障与边界','方案取舍','团队协作','候选人反问'],
-  '行为面':['个人背景','团队协作','冲突处理','失败与学习','推动改变','压力与优先级','职业规划','候选人反问']
-};const interviewModeOptions = [
+const interviewModeOptions = [
   ['综合面','综合面','项目、动机、协作和反思','校招/实习最常用，覆盖项目、动机、团队协作和学习反思。'],
   ['技术面','技术面','项目深挖、故障和技术取舍','更适合技术面试，但仍会保留背景和候选人反问。'],
   ['HR面','HR/招聘面','动机、稳定性、规划和沟通','重点验证求职动机、城市/到岗意愿、沟通和职业规划。'],
@@ -78,7 +83,9 @@ export async function interview(root, signal, query) {
     request('/resumes',{signal}), request('/jobs?limit=200',{signal}), request('/interviews',{signal})
   ]);
   if (signal.aborted) return;
-  const [resumes,jobs,sessions]=responses.map(result=>result.status==='fulfilled'?result.value:[]);
+  const [resumeRows,jobs,sessionRows]=responses.map(result=>result.status==='fulfilled'?result.value:[]);
+  const resumes=filterDemo(resumeRows);
+  const sessions=filterDemo(sessionRows);
   const unavailable=responses.some(result=>result.status==='rejected');
   const selectedJob = query.get('job');
   if (selectedJob && !jobs.some(job => String(job.id) === selectedJob)) {
@@ -172,7 +179,7 @@ export async function interview(root, signal, query) {
     $('.story-bank-count',storyPanel).textContent = items.length ? `${items.length} 条` : '暂无';
     storyList.innerHTML = items.length ? items.map(story=>{
       const competencies = (story.competencies || []).map(item=>`<span class="chip">${esc(item)}</span>`).join('');
-      const source = [story.projectName, story.interviewMode, story.usageCount ? `已使用 ${story.usageCount} 次` : '尚未复用'].filter(Boolean).join(' · ');
+      const source = [dataKindLabel(story), story.projectName, story.interviewMode, story.usageCount ? `已使用 ${story.usageCount} 次` : '尚未复用'].filter(Boolean).join(' · ');
       const sources = storySources(story);
       const primarySource = sources[0] || {};
       const sourceLabel = primarySource.id ? `来源：${primarySource.jobTitle || '面试记录'} · ${primarySource.updatedAt ? date(primarySource.updatedAt) : '时间未知'} · #${primarySource.id}` : '来源：未知面试记录';
@@ -206,7 +213,7 @@ export async function interview(root, signal, query) {
     storyPanel.hidden = false;
     storyList.innerHTML = '<p class="muted">正在读取跨场次故事库…</p>';
     try {
-      const stories = await request('/stories?resumeId='+encodeURIComponent(storyResumeId),{signal});
+      const stories = filterDemo(await request('/stories?resumeId='+encodeURIComponent(storyResumeId),{signal}));
       if (storyResumeId === Number(resumeId)) renderStories(stories);
     } catch (cause) {
       if (!signal.aborted) storyList.innerHTML = `<p class="muted">${esc(cause.message)}</p>`;
@@ -471,7 +478,7 @@ export async function interview(root, signal, query) {
     $('.stack',historyPanel).innerHTML = sessions.map(item =>
       `<div class="history-item">
         <button type="button" class="row" data-session="${esc(item.id)}" aria-pressed="${item.id === activeId}">
-          <strong>${esc(item.jobTitle)}</strong><small>${esc(item.interviewMode || '综合面')} · ${item.status === 'COMPLETED' ? '已完成' : '继续练习'} · ${date(item.updatedAt)}</small>
+          <strong>${esc(item.jobTitle)}</strong><small>${esc(dataKindLabel(item))} · ${esc(item.interviewMode || '综合面')} · ${item.status === 'COMPLETED' ? esc(scoreVersionLabel(item) || '已完成') : '继续练习'} · ${date(item.updatedAt)}</small>
         </button>
         <button type="button" class="history-delete" data-delete-session="${esc(item.id)}" aria-label="删除 ${esc(item.jobTitle)} 的历史对话" title="删除历史对话">删除</button>
       </div>`).join('');
@@ -593,19 +600,21 @@ function renderChat(chat, session, signal, onUpdate, moveFocus) {
   chat.dataset.session = session.id;
   const finished = session.status === 'COMPLETED';
   const mode = session.interviewMode || '综合面';
-  const plan = interviewModePlans[mode] || interviewModePlans['综合面'];
-  const currentStage = plan[Math.max(0, Math.min(plan.length-1, Number(session.currentRound || 1)-1))];
   const draftKey = session.id+':'+session.currentRound;
   const messages = session.messages || [];
   const latestFeedback = advisoryFeedback(messages.findLast(message => message.role === 'user' && message.feedback)?.feedback);
   const latestPrompt = messages.at(-1)?.role === 'assistant' ? messages.at(-1).content : '';
+  const hasAnswered = messages.some(message => message.role === 'user');
   const earlier = messages.filter((message,index) => {
     if (message.role !== 'assistant') return true;
     return index !== messages.length - 1 && messages[index-1]?.feedback !== message.content;
   });
   chat.innerHTML = `<header class="interview-round">
-      <div><p class="session-mode">${esc(mode)} · ${esc(session.difficulty)}${finished ? '' : ' · 本轮 '+esc(currentStage)}</p><h2>${esc(session.jobTitle)}</h2></div>
-      <span class="chip">${finished ? '已完成' : `第 ${esc(session.currentRound)} / ${esc(session.totalRounds)} 轮`}</span>
+      <div><p class="session-mode">${esc(mode)} · ${esc(session.difficulty)}${finished ? '' : ' · 自适应追问'}</p><h2>${esc(session.jobTitle)}</h2></div>
+      <div class="interview-round-tools">
+        <span class="chip">${finished ? esc(scoreVersionLabel(session) || '已完成') : `第 ${esc(session.currentRound)} / ${esc(session.totalRounds)} 轮`}</span>
+        ${hasAnswered ? '<button class="quiet undo-answer" type="button">← 撤回上一题</button>' : ''}
+      </div>
     </header>
     <div class="interview-current" aria-live="polite">
       <h3>${finished ? '练习总结' : '当前问题'}</h3><p class="pre-line">${esc(latestPrompt)}</p>
@@ -634,6 +643,18 @@ function renderChat(chat, session, signal, onUpdate, moveFocus) {
       if (output.isConnected) output.textContent = cause.message;
     }
   }));
+  const undo = $('.undo-answer',chat);
+  undo?.addEventListener('click',task(undo,async()=>{
+    const warning = finished
+      ? '撤回最后一次回答会重新打开本场面试，并移除本场生成的成长故事。继续吗？'
+      : '撤回最后一次回答，返回上一题重新回答？';
+    if (!confirm(warning)) return;
+    const updated = await request('/interviews/'+session.id+'/undo',{method:'POST',data:{},signal});
+    for (const key of [...answerDrafts.keys()]) {
+      if (key.startsWith(session.id+':')) answerDrafts.delete(key);
+    }
+    if (chat.dataset.session === String(session.id)) onUpdate(updated,true);
+  }));
   const form = $('#answer-form',chat);
   if (moveFocus) {
     const focusTarget = form?.elements.answer || $('.button.primary',chat);
@@ -659,12 +680,14 @@ export async function growth(root, signal, query) {
     <section class="panel" id="growth-report" aria-label="记录详情" aria-live="polite">${empty('正在读取记录详情')}</section>
   </div>`;
   const choices = $('#growth-options',root), target = $('#growth-report',root);
-  const [reports,sessions] = await Promise.all([request('/diagnoses',{signal}),request('/interviews',{signal})]);
+  const [reportRows,sessionRows] = await Promise.all([request('/diagnoses',{signal}),request('/interviews',{signal})]);
+  const reports = filterDemo(reportRows);
+  const sessions = filterDemo(sessionRows);
   if (signal.aborted) return;
   const completed = sessions.filter(item=>item.status==='COMPLETED');
   const events = [
-    ...completed.map(item=>({type:'session', item, time:item.updatedAt, title:item.jobTitle, label:'面试练习'})),
-    ...reports.map(item=>({type:'report', item, time:item.createdAt, title:item.targetRole, label:'简历诊断'}))
+    ...completed.map(item=>({type:'session', item, time:item.updatedAt, title:item.jobTitle, label:`${dataKindLabel(item)}面试${item.scoreComparable ? '' : ' · 旧评分规则'}`})),
+    ...reports.map(item=>({type:'report', item, time:item.createdAt, title:item.targetRole, label:`${dataKindLabel(item)}简历诊断`}))
   ].sort(byRecent);
   const session = completed.find(item=>String(item.id)===query.get('session'))
     || completed.find(item=>String(item.resumeId)===query.get('resume') && String(item.jobId)===query.get('job'));
@@ -690,7 +713,7 @@ export async function growth(root, signal, query) {
       const first = active?.type==='session' ? active.item : completed[0];
       const previous = active;
       comparePractice(target,completed,first,()=>{
-        show(previous || {type:'session',item:first,time:first.updatedAt,title:first.jobTitle,label:'面试练习'},true);
+        show(previous || {type:'session',item:first,time:first.updatedAt,title:first.jobTitle,label:`${dataKindLabel(first)}面试${first.scoreComparable ? '' : ' · 旧评分规则'}`},true);
       });
     };
   }
@@ -736,7 +759,8 @@ export async function growth(root, signal, query) {
       feedback: advisoryFeedback(message.feedback)
     }] : []);
     const latestFeedback = turns.at(-1)?.feedback || '';
-    target.innerHTML = `<p class="record-type">${esc(item.interviewMode || '综合面')}复盘</p><h2>${esc(item.jobTitle)}</h2>
+    const versionLabel = scoreVersionLabel(item);
+    target.innerHTML = `<p class="record-type">${esc(item.interviewMode || '综合面')}复盘 · ${esc(dataKindLabel(item))}${versionLabel ? ` · ${esc(versionLabel)}` : ''}</p><h2>${esc(item.jobTitle)}</h2>
       ${item.skillEvidence?.length ? `<details class="disclosure"><summary>面试技能证据</summary>
         ${item.skillEvidence.map(skill=>`<article class="note"><strong>${esc(skill.skill)} · ${skill.verified?'已有回答证据':'待补充证据'}</strong>
           <ul>${(skill.evidence || []).map(item=>`<li>${esc(item)}</li>`).join('')}</ul></article>`).join('')}</details>`:''}
@@ -758,7 +782,7 @@ export async function growth(root, signal, query) {
       if (signal.aborted) return;
       const index = events.findIndex(entry=>entry.type==='report' && entry.item.id===report.id);
       if (index >= 0) events.splice(index,1);
-      const record = {type:'report',item:report,time:report.createdAt,title:report.targetRole,label:'简历诊断'};
+      const record = {type:'report',item:report,time:report.createdAt,title:report.targetRole,label:`${dataKindLabel(report)}简历诊断`};
       events.push(record);
       events.sort(byRecent);
       const stillReviewing = active.item === item;

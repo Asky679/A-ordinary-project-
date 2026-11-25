@@ -4,7 +4,7 @@
 
 | Agent | 入口 | 职责 |
 | --- | --- | --- |
-| 面试 Agent | `POST /v1/interviews/start`、`POST /v1/interviews/{id}/answer` | 五轮技能验证、回答评分、技能证据、会话记忆 |
+| 面试 Agent | `POST /v1/interviews/start`、`POST /v1/interviews/{id}/answer` | 自适应轮次技能验证、回答评分、技能证据、会话记忆 |
 | 岗位推荐 Agent | `POST /v1/diagnosis/agent` | 读简历 -> 语义召回岗位 -> 算法精排 -> 反思重试 -> 输出推荐与技能缺口 |
 
 ## 面试技能证据
@@ -19,9 +19,29 @@
 HR面 / 主管面 / 行为面：按动机、协作、冲突、失败、规划等维度推进
 ```
 
-LangGraph 会按固定维度计划控制轮次。同一技术主题不会无限追问，行为题不会因为缺少技术关键词被低分。
+面试 Agent 采用自适应路由：`required_stages` 定义必须覆盖的能力底线，`optional_stages` 是证据缺口追问池，LangGraph 根据上一轮得分和 gaps 动态选择下一维度，不再固定按八轮顺序推进，轮次可在 6—10 之间动态变化。回答充分时可提前进入反问，证据不足时会追加基础概念、边界、验证或证据补强。
+
+Java、前端、测试、运维、数据/AI、嵌入式/C++、网络安全、Go 后端各有独立的方向级阶段问题，覆盖职责边界、业务链路、技术实现、故障边界、方案取舍、结果验证和迁移验证。Java 本地兜底也会附加方向提示。
+
+面试支持撤回上一题：Python 侧从撤销栈恢复回答前的轮次、阶段、路线和 Agent 记忆，同时清理该会话的 LangGraph checkpoint；Java 侧删除最后一轮用户回答、反馈和后续问题，重新计算总分，并清除已生成的技能证据与成长故事。
 
 Agent 根据岗位技能和上一轮回答选择下一问；完成后 Java 侧会把完整面试转录转换为技能证据，写入 `interview_sessions.skill_evidence_json`。低分核心技能会限制岗位适配度，不能靠 Agent 调权绕过。
+
+## PostgreSQL 状态持久化
+
+面试 Agent 使用两层 PostgreSQL 持久化：
+
+- `langgraph_interview_states`：保存自定义面试上下文，包括当前轮次、动态路线、已回答内容、记忆和撤回栈。
+- LangGraph checkpoint 表：`checkpoints`、`checkpoint_blobs`、`checkpoint_writes`，由 `langgraph-checkpoint-postgres` 自动建立。
+
+服务启动时会优先使用 PostgreSQL checkpointer；数据库不可用时自动回退到 `MemorySaver`，不会阻塞面试。
+
+```text
+CAREERNAV_DB_URL=postgresql://careernav@127.0.0.1:5432/careernav
+LANGGRAPH_STATE_PERSISTENCE=true
+```
+
+服务重启后，下一次读取会话会从 `langgraph_interview_states` 恢复上下文，LangGraph 也会通过 PostgreSQL checkpoint 恢复工具会话状态。
 
 ## 启动
 

@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
@@ -84,6 +85,29 @@ class InterviewServiceProjectEvidenceTest {
         assertTrue(question.contains("为什么选择"));
         assertTrue(!question.contains("请具体说明订单状态"));
     }
+
+    @Test
+    void juniorTechnicalQuestionsChangeByJobDirection() throws Exception {
+        InterviewService service = service();
+        Method method = InterviewService.class.getDeclaredMethod(
+                "juniorQuestionForStage", String.class, String.class, String.class, String.class,
+                String.class, String.class, String.class, String.class, String.class, String.class);
+        method.setAccessible(true);
+
+        String javaQuestion = (String) method.invoke(service, "技术实现", "Java后端", "订单系统",
+                "后端开发", "订单接口", "Java", "测试公司", "Java开发", "长沙", "接口开发");
+        String frontendQuestion = (String) method.invoke(service, "技术实现", "前端", "订单系统",
+                "前端开发", "订单页面", "Vue", "测试公司", "前端开发", "长沙", "页面开发");
+        String testQuestion = (String) method.invoke(service, "技术实现", "测试", "订单系统",
+                "测试开发", "订单测试", "Selenium", "测试公司", "测试工程师", "长沙", "接口测试");
+
+        assertNotEquals(javaQuestion, frontendQuestion);
+        assertNotEquals(javaQuestion, testQuestion);
+        assertTrue(javaQuestion.contains("Controller"));
+        assertTrue(frontendQuestion.contains("页面状态"));
+        assertTrue(testQuestion.contains("测试用例"));
+    }
+
     private InterviewService service() {
         return new InterviewService(
                 mock(InterviewSessionRepository.class), mock(ResumeService.class), mock(JobService.class),

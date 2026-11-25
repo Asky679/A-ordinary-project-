@@ -7,6 +7,7 @@ from typing import Any
 import requests
 from langchain_core.tools import tool
 
+from .state_store import load_context as load_persisted_context, save_context as save_persisted_context
 from .junior_reference import (
     infer_direction,
     is_junior_level,
@@ -52,7 +53,7 @@ def _retrieval_tokens(text: str) -> set[str]:
 
 TECHNICAL_STAGES = {
     "项目职责", "项目概述", "业务链路", "技术实现", "基础概念", "故障与取舍",
-    "故障与边界", "方案取舍", "结果验证", "技术判断",
+    "故障与边界", "方案取舍", "结果验证", "技术判断", "证据补强", "迁移验证", "错误原因",
 }
 MODE_DESCRIPTIONS = {
     "综合面": "项目+动机+协作+反思",
@@ -124,16 +125,24 @@ BANK_STAGE_ALIASES = {
     "候选人反问": "reverse",
 }
 
+def persist_context(session_id: str) -> None:
+    save_persisted_context(session_id, CONTEXTS.get(session_id, {}))
+
+
 def set_context(session_id: str, payload: dict[str, Any]) -> None:
     context = CONTEXTS.setdefault(session_id, {})
     context.update(payload)
     context.setdefault("memory", [])
     context.setdefault("history", [])
     context.setdefault("round", 1)
+    persist_context(session_id)
 
 
 def get_context(session_id: str) -> dict[str, Any]:
-    return CONTEXTS.setdefault(session_id, {"memory": [], "history": [], "round": 1})
+    if session_id not in CONTEXTS:
+        persisted = load_persisted_context(session_id)
+        CONTEXTS[session_id] = persisted if persisted is not None else {"memory": [], "history": [], "round": 1}
+    return CONTEXTS[session_id]
 
 
 def context_public(session_id: str) -> dict[str, Any]:
@@ -333,6 +342,7 @@ def save_interview_memory(session_id: str, note: str) -> str:
     note = (note or "").strip()
     if note and note not in context["memory"]:
         context["memory"].append(note)
+        persist_context(session_id)
     return json.dumps({"saved": bool(note), "memory": context["memory"]}, ensure_ascii=False)
 
 

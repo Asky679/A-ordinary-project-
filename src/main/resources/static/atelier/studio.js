@@ -1,6 +1,7 @@
 import { request, params, download } from './api.js';
 import { $, $$, esc, text, date, chips, empty, error, options, link, notify, task, showDialog } from './ui.js';
 import { learning } from './practice.js';
+import { filterDemo, dataKindLabel } from './auth.js';
 
 const profile = [
   ['ownerName','姓名','text',true],['targetRole','目标岗位','text',true],['city','城市'],
@@ -271,7 +272,7 @@ export function studio(root, signal, query) {
   refreshSelect();
   render();
   request('/resumes',{signal}).then(items=>{ if(!signal.aborted){
-    saved=items;
+    saved=filterDemo(items);
     const selected = saved.find(item=>String(item.id)===requestedResume);
     if (selected && currentId!==requestedResume) { currentId=requestedResume; draft=selected; render(); }
     refreshSelect();
@@ -286,13 +287,13 @@ async function library(root,signal) {
     <label>查找简历<input type="search" placeholder="姓名、目标岗位或城市"></label>
     <div class="library-files" aria-live="polite">${empty('正在读取简历档案')}</div></section>`;
   const list = $('.library-files',root), filter = $('input',root);
-  const items = await request('/resumes',{signal});
+  const items = filterDemo(await request('/resumes',{signal}));
   if (signal.aborted) return;
   function draw() {
     const keyword = filter.value.trim().toLowerCase();
     const visible = items.filter(item=>[item.ownerName,item.targetRole,item.city].some(value=>String(value||'').toLowerCase().includes(keyword)));
     list.innerHTML = visible.length ? visible.map(item=>`<article class="library-file">
-      <div><h3>${esc(item.ownerName)}</h3><p>${esc(item.targetRole)}</p><small>${[item.city,date(item.updatedAt)].filter(Boolean).map(esc).join(' · ')}</small></div>
+      <div><h3>${esc(item.ownerName)}</h3><p>${esc(item.targetRole)}</p><small>${[dataKindLabel(item),item.city,date(item.updatedAt)].filter(Boolean).map(esc).join(' · ')}</small></div>
       <div class="actions">${link('studio?work=1&resume='+encodeURIComponent(item.id),'打开编辑 →','button')}
         <a class="quiet" href="/api/resumes/${encodeURIComponent(item.id)}/pdf" download>导出 PDF</a>
         <button class="quiet" data-remove-resume="${esc(item.id)}" type="button">删除</button></div></article>`).join('')

@@ -44,7 +44,6 @@ public interface JobRepository extends JpaRepository<JobEntity, Long> {
             WHERE status = 'ACTIVE'
               AND (:city = '' OR city ILIKE CONCAT('%', :city, '%'))
             ORDER BY dataset_year DESC NULLS LAST, id DESC
-            LIMIT 5000
             """, nativeQuery = true)
     List<JobEntity> findRecommendationCandidates(@Param("city") String city);
 

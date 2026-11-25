@@ -6,6 +6,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -57,6 +59,7 @@ public class LangGraphJobAgentClient {
             body.put("city", city == null ? "" : city);
             body.put("excludedCities", excludedCities == null ? "" : excludedCities);
             body.put("limit", limit <= 0 ? 8 : limit);
+            body.put("authorization", currentAuthorization());
             String json = objectMapper.writeValueAsString(body);
             HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + "/v1/diagnosis/agent"))
                     .timeout(Duration.ofSeconds(180))
@@ -73,5 +76,13 @@ public class LangGraphJobAgentClient {
             log.warn("LangGraph job agent call failed: {}", exception.getMessage());
             return null;
         }
+    }
+
+    private String currentAuthorization() {
+        if (RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attributes) {
+            String value = attributes.getRequest().getHeader("Authorization");
+            return value == null ? "" : value;
+        }
+        return "";
     }
 }

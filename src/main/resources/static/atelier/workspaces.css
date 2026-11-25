@@ -242,6 +242,9 @@ body[data-route="interview"][data-layer="work"] .work-masthead h1 { font-size:cl
 .interview-current + .button.primary { margin-top:16px }
 .session-load-status { margin-top:10px }
 .interview-round .chip { border:0; background:#eee3d4; font-weight:650 }
+.interview-round-tools { display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:8px }
+.interview-round-tools .undo-answer { border:0; padding:5px 8px; background:transparent; color:#76543d; font-size:.82rem; cursor:pointer }
+.interview-round-tools .undo-answer:hover { background:#f1e6d7 }
 .interview-layout .chat-scroll { padding-block:18px; gap:13px; max-height:420px }
 .interview-layout .bubble {
   max-width:min(100%,75ch);

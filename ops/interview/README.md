@@ -113,3 +113,14 @@ INTERVIEW_EMBEDDING_URL=http://127.0.0.1:5002/v1/embeddings
 ```
 
 向量库不可用时，工具返回 `available:false`，Agent 自动退回内置 `search_question_bank`，面试流程不中断。
+
+## 历史评分迁移
+
+历史初级面试可先预览、再按当前规则重算：
+
+```powershell
+python .\ops\interview\rescore_legacy_sessions.py --session-ids 98-107
+python .\ops\interview\rescore_legacy_sessions.py --session-ids 98-107 --apply
+```
+
+脚本会把原总分保存到 `legacy_overall_score`，写入新的 `scoring_version`，并清除旧技能证据，避免旧评分口径继续影响诊断。

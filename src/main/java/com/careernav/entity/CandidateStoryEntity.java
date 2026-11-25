@@ -12,6 +12,8 @@ import java.time.LocalDateTime;
 public class CandidateStoryEntity {
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+    @Column(name = "user_id") private Long userId;
+    @Column(name = "data_kind", length = 20) private String dataKind;
     private Long resumeId;
     private Long jobId;
     private Long sourceSessionId;
@@ -36,6 +38,9 @@ public class CandidateStoryEntity {
     private LocalDateTime deletedAt;
 
     public Long getId() { return id; }
+    public String getDataKind() { return dataKind; } public void setDataKind(String v) { dataKind = v; }
+    public Long getUserId() { return userId; }
+    public void setUserId(Long value) { userId = value; }
     public void setId(Long value) { id = value; }
     public Long getResumeId() { return resumeId; }
     public void setResumeId(Long value) { resumeId = value; }

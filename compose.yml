@@ -1,0 +1,213 @@
+name: careernav
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:18-alpine}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-careernav}
+      POSTGRES_USER: ${POSTGRES_USER:-careernav}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-careernav_dev_change_me}
+      PGDATA: /var/lib/postgresql/data
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-careernav} -d ${POSTGRES_DB:-careernav}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    networks: [careernav]
+    logging: *default-logging
+
+  postgres-seed:
+    image: ${POSTGRES_IMAGE:-postgres:18-alpine}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER:-careernav}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-careernav_dev_change_me}
+      PGDATABASE: ${POSTGRES_DB:-careernav}
+    volumes:
+      - ./docker/seed/postgres:/seed/postgres:ro
+      - ./docker/scripts/seed-postgres.sh:/seed/seed-postgres.sh:ro
+    entrypoint: ["/bin/sh", "/seed/seed-postgres.sh"]
+    restart: "no"
+    networks: [careernav]
+    logging: *default-logging
+
+  qdrant:
+    image: ${QDRANT_IMAGE:-qdrant/qdrant:v1.19.2}
+    restart: unless-stopped
+    environment:
+      QDRANT__SERVICE__ENABLE_TLS: "false"
+    volumes:
+      - qdrant_data:/qdrant/storage
+      - ./docker/seed/qdrant:/seed/qdrant:ro
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333'"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    networks: [careernav]
+    logging: *default-logging
+
+  qdrant-seed:
+    image: curlimages/curl:8.12.1
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      JOB_COLLECTION: ${QDRANT_COLLECTION:-careernav_jobs}
+      INTERVIEW_COLLECTION: careernav_interview_questions
+    volumes:
+      - ./docker/scripts/seed-qdrant.sh:/seed/seed-qdrant.sh:ro
+    entrypoint: ["/bin/sh", "/seed/seed-qdrant.sh"]
+    restart: "no"
+    networks: [careernav]
+    logging: *default-logging
+
+  embedding-jobs:
+    build:
+      context: .
+      dockerfile: docker/embedding/Dockerfile
+    restart: unless-stopped
+    command: ["python", "/app/job_embedding_server.py"]
+    environment:
+      JOB_EMBEDDING_MODEL: /models/tfidf_svd_256.joblib
+      JOB_EMBEDDING_HOST: 0.0.0.0
+      JOB_EMBEDDING_PORT: "5001"
+    volumes:
+      - ./data/models:/models:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5001/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    networks: [careernav]
+    logging: *default-logging
+
+  embedding-interview:
+    build:
+      context: .
+      dockerfile: docker/embedding/Dockerfile
+    restart: unless-stopped
+    command: ["python", "/app/interview_embedding_server.py"]
+    environment:
+      INTERVIEW_EMBEDDING_MODEL: /models/tfidf_svd_256_interview.joblib
+      INTERVIEW_EMBEDDING_HOST: 0.0.0.0
+      INTERVIEW_EMBEDDING_PORT: "5002"
+    volumes:
+      - ./data/models:/models:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5002/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    networks: [careernav]
+    logging: *default-logging
+
+  interview-agent:
+    build:
+      context: .
+      dockerfile: docker/agent/Dockerfile
+    restart: unless-stopped
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.deepseek.com/v1}
+      OPENAI_MODEL: ${OPENAI_MODEL:-deepseek-chat}
+      LANGGRAPH_PORT: "8001"
+      LANGGRAPH_MAX_ROUNDS: ${LANGGRAPH_MAX_ROUNDS:-10}
+      LANGGRAPH_STATE_PERSISTENCE: "true"
+      CAREERNAV_DB_URL: postgresql://${POSTGRES_USER:-careernav}:${POSTGRES_PASSWORD:-careernav_dev_change_me}@postgres:5432/${POSTGRES_DB:-careernav}
+      CAREERNAV_API_BASE: http://app:8080/api
+      INTERVIEW_QDRANT_URL: http://qdrant:6333
+      INTERVIEW_COLLECTION: careernav_interview_questions
+      INTERVIEW_EMBEDDING_URL: http://embedding-interview:5002/v1/embeddings
+    depends_on:
+      postgres-seed:
+        condition: service_completed_successfully
+      qdrant-seed:
+        condition: service_completed_successfully
+      embedding-interview:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=5)"]
+      interval: 15s
+      timeout: 8s
+      retries: 20
+      start_period: 20s
+    volumes:
+      - ./logs/agent:/app/logs
+    networks: [careernav]
+    logging: *default-logging
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-careernav}
+      DB_USERNAME: ${POSTGRES_USER:-careernav}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-careernav_dev_change_me}
+      APP_AUTH_SECRET: ${APP_AUTH_SECRET:-careernav-development-secret-change-me}
+      APP_AUTH_TOKEN_HOURS: ${APP_AUTH_TOKEN_HOURS:-168}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.deepseek.com/v1}
+      OPENAI_MODEL: ${OPENAI_MODEL:-deepseek-chat}
+      LANGGRAPH_ENABLED: "true"
+      LANGGRAPH_URL: http://interview-agent:8001
+      LANGGRAPH_TIMEOUT_SECONDS: "120"
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-careernav_jobs}
+      EMBEDDING_API_KEY: local
+      EMBEDDING_BASE_URL: http://embedding-jobs:5001/v1
+      EMBEDDING_MODEL: tfidf-svd-256
+      EMBEDDING_DIMENSIONS: "256"
+      LOG_FILE: /app/logs/careernav.log
+      SERVER_PORT: "8080"
+    depends_on:
+      postgres-seed:
+        condition: service_completed_successfully
+      qdrant-seed:
+        condition: service_completed_successfully
+      embedding-jobs:
+        condition: service_healthy
+      embedding-interview:
+        condition: service_healthy
+      interview-agent:
+        condition: service_healthy
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/api/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 8s
+      retries: 30
+      start_period: 30s
+    volumes:
+      - ./logs/app:/app/logs
+    networks: [careernav]
+    logging: *default-logging
+
+networks:
+  careernav:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  qdrant_data:

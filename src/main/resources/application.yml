@@ -38,6 +38,9 @@ logging:
     dev.langchain4j: INFO
 
 app:
+  auth:
+    secret: ${APP_AUTH_SECRET:careernav-development-secret-change-me}
+    token-hours: ${APP_AUTH_TOKEN_HOURS:168}
   agent:
     api-key: ${OPENAI_API_KEY:}
     base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}

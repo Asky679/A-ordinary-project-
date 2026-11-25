@@ -105,7 +105,7 @@ AHP 分两层输出：
 
 ## 3.2 面试驱动的技能验证
 
-选择题测试链路已经删除。用户选择岗位并填写脱敏项目证据卡后发起八轮项目面试，面试 Agent 按以下顺序形成证据：
+选择题测试链路已经删除。用户选择岗位并填写脱敏项目证据卡后发起 6—10 轮自适应项目面试，面试 Agent 按以下顺序形成证据：
 
 ```text
 职责边界 -> 业务链路 -> 技术实现 -> 故障与边界 -> 方案取舍 -> 结果验证 -> 证据补强 -> 迁移验证
@@ -151,7 +151,7 @@ hardConstraints / companyStyle
 coveragePlan / sourceSummary
 ```
 
-规则提取作为兜底；在线模型只允许依据 JD 事实补全，不得把候选人简历技能写成岗位要求。蓝图会以 `interview_sessions.job_blueprint_json` 保存快照，并传给 LangGraph 面试 Agent。Agent 在八轮追问中优先覆盖蓝图中的必备技能、职责和场景，同时用脱敏项目证据卡选择提问载体。
+规则提取作为兜底；在线模型只允许依据 JD 事实补全，不得把候选人简历技能写成岗位要求。蓝图会以 `interview_sessions.job_blueprint_json` 保存快照，并传给 LangGraph 面试 Agent。Agent 在 6—10 轮自适应追问中优先覆盖蓝图中的必备技能、职责和场景，同时用脱敏项目证据卡选择提问载体。
 
 相关接口：`GET /api/interviews/blueprint?jobId={id}`。该接口只预览蓝图，不创建会话；正式开始面试时保存岗位快照。
 
@@ -190,7 +190,7 @@ coveragePlan / sourceSummary
 - Collection：`careernav_jobs`
 - 向量维度：256
 - 距离：Cosine
-- 当前索引岗位：4,110
+- 当前 Qdrant 岗位向量点：9,189
 
 本地 Embedding 服务：
 
@@ -206,8 +206,8 @@ Spring Boot 通过 Qdrant REST API 创建 collection、批量写入 points、执
 岗位向量解决“招什么”，面试题向量解决“问什么”，两者分属不同集合、不同嵌入空间，互不干扰。
 
 ```text
-careernav_jobs                    4,110 条   岗位检索（Java LangChain4j / JobVectorSearchService）
-careernav_interview_questions     1,508 条   题库检索（Python LangGraph search_interview_questions_qdrant）
+careernav_jobs                    9,189 个向量点   岗位检索（Java LangChain4j / JobVectorSearchService）
+careernav_interview_questions     1,508 个向量点   题库检索（Python LangGraph search_interview_questions_qdrant）
 ```
 
 数据链路：

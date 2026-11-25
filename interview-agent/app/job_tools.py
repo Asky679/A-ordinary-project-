@@ -16,6 +16,8 @@ graph can degrade gracefully instead of crashing mid-run.
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import json
 import os
 from typing import Any
@@ -25,6 +27,21 @@ from langchain_core.tools import tool
 
 API_BASE = os.getenv("CAREERNAV_API_BASE", "http://127.0.0.1:8080/api").rstrip("/")
 API_TIMEOUT = int(os.getenv("CAREERNAV_API_TIMEOUT", "60"))
+_AUTH_HEADER = contextvars.ContextVar("careernav_job_api_authorization", default="")
+
+
+@contextlib.contextmanager
+def api_authorization(value: str):
+    token = _AUTH_HEADER.set(value or "")
+    try:
+        yield
+    finally:
+        _AUTH_HEADER.reset(token)
+
+
+def _headers() -> dict[str, str]:
+    value = _AUTH_HEADER.get()
+    return {"Authorization": value} if value else {}
 
 # job ids that were really returned by a tool, keyed by resume id.
 # finalize_recommendation() validates against this registry so the model can
@@ -65,7 +82,7 @@ def _brief(job: dict) -> dict:
 
 
 def _get(path: str, params: dict | None = None) -> Any:
-    response = requests.get(API_BASE + path, params=params or {}, timeout=API_TIMEOUT)
+    response = requests.get(API_BASE + path, params=params or {}, headers=_headers(), timeout=API_TIMEOUT)
     response.raise_for_status()
     body = response.json()
     if isinstance(body, dict) and body.get("success") is False:

@@ -1,8 +1,22 @@
 import json
 import unittest
 
-from app.graph import _level_guidance, _stage_question
-from app.junior_reference import infer_direction, junior_guard_question, reconcile_junior_score
+from app.graph import (
+    INTERVIEW_MODE_OPTIONAL_STAGES,
+    INTERVIEW_MODE_REQUIRED_STAGES,
+    InterviewAgent,
+    _enforce_round_policy,
+    _level_guidance,
+    _stage_question,
+)
+from app.junior_reference import (
+    JUNIOR_REFERENCE,
+    infer_direction,
+    junior_guard_question,
+    junior_stage_question,
+    reconcile_junior_score,
+    select_next_junior_stage,
+)
 from app.tools import (
     evaluate_candidate_answer,
     get_junior_interview_reference,
@@ -130,6 +144,8 @@ class JuniorInterviewTests(unittest.TestCase):
         self.assertTrue(result["interviewRhythm"])
         self.assertEqual(result["direction"], "Java后端")
         self.assertTrue(result["directionPatterns"])
+        self.assertTrue(result["directionStagePatterns"])
+        self.assertIn("技术实现", result["directionStagePatterns"])
 
     def test_junior_scoring_rewards_evidence_not_buzzwords(self):
         set_context("junior-score", JUNIOR_CONTEXT)
@@ -200,6 +216,308 @@ class JuniorInterviewTests(unittest.TestCase):
         self.assertNotIn("异地多活", guarded)
         self.assertLessEqual(guarded.count("？") + guarded.count("?"), 1)
 
+    def test_second_to_eighth_questions_change_by_job_direction(self):
+        stages = ("项目职责", "业务链路", "技术实现", "故障与边界", "方案取舍", "结果验证", "迁移验证")
+        directions = [
+            ("Java后端实习", ["Java", "MySQL"]),
+            ("前端开发实习", ["Vue", "JavaScript", "CSS"]),
+            ("测试工程师实习", ["Selenium", "接口测试"]),
+        ]
+        questions_by_stage = {}
+        for stage in stages:
+            values = []
+            for title, skills in directions:
+                context = {
+                    **JUNIOR_CONTEXT,
+                    "job": {**JUNIOR_CONTEXT["job"], "title": title, "skills": skills},
+                    "resume": {**JUNIOR_CONTEXT["resume"], "targetRole": title, "skills": skills},
+                }
+                values.append(junior_stage_question(stage, context))
+            questions_by_stage[stage] = values
+            self.assertEqual(len(set(values)), 3, f"stage={stage}, questions={values}")
+
+        self.assertIn("Controller", questions_by_stage["项目职责"][0])
+        self.assertIn("页面", questions_by_stage["项目职责"][1])
+        self.assertIn("测试", questions_by_stage["项目职责"][2])
+
+    def test_adaptive_route_adds_verification_when_answer_has_no_evidence(self):
+        context = {
+            **JUNIOR_CONTEXT,
+            "round": 5,
+            "current_stage": "技术实现",
+            "answer": "我负责订单接口，用了 Spring 和 MySQL。",
+            "stage_route": ["个人背景", "项目职责", "业务链路", "技术实现"],
+            "visited_stages": ["个人背景", "项目职责", "业务链路", "技术实现"],
+        }
+        evaluation = {"score": 70, "gaps": ["没有说明如何验证"]}
+        stage, reason = select_next_junior_stage(
+            context,
+            evaluation,
+            INTERVIEW_MODE_REQUIRED_STAGES["技术面"],
+            INTERVIEW_MODE_OPTIONAL_STAGES["技术面"],
+            8,
+        )
+        self.assertEqual(stage, "结果验证")
+        self.assertIn("验证", reason)
+
+    def test_adaptive_route_inserts_basic_concept_for_weak_answer(self):
+        context = {
+            **JUNIOR_CONTEXT,
+            "round": 2,
+            "current_stage": "项目职责",
+            "answer": "我参与了这个项目。",
+            "stage_route": ["个人背景", "项目职责"],
+            "visited_stages": ["个人背景", "项目职责"],
+        }
+        evaluation = {"score": 60, "gaps": ["个人贡献不够明确"]}
+        stage, _ = select_next_junior_stage(
+            context,
+            evaluation,
+            INTERVIEW_MODE_REQUIRED_STAGES["技术面"],
+            INTERVIEW_MODE_OPTIONAL_STAGES["技术面"],
+            10,
+        )
+        self.assertEqual(stage, "基础概念")
+        self.assertEqual(context["target_rounds"], 9)
+
+    def test_adaptive_route_ends_after_required_coverage(self):
+        visited = ["个人背景", "项目职责", "业务链路", "技术实现", "故障与边界", "结果验证"]
+        context = {
+            **JUNIOR_CONTEXT,
+            "round": 6,
+            "current_stage": "结果验证",
+            "answer": "我用正常、异常和边界用例验证过，日志和接口返回都能对上。",
+            "stage_route": visited,
+            "visited_stages": visited,
+        }
+        evaluation = {"score": 88, "gaps": []}
+        stage, reason = select_next_junior_stage(
+            context,
+            evaluation,
+            INTERVIEW_MODE_REQUIRED_STAGES["技术面"],
+            INTERVIEW_MODE_OPTIONAL_STAGES["技术面"],
+            8,
+        )
+        self.assertEqual(stage, "候选人反问")
+        self.assertIn("核心维度", reason)
+        self.assertEqual(context["target_rounds"], len(INTERVIEW_MODE_REQUIRED_STAGES["技术面"]))
+
+        context["pending_stage"] = stage
+        question, done, _, _ = _enforce_round_policy(context, "answer", "", False)
+        self.assertFalse(done)
+        self.assertTrue(question)
+
+        context["current_stage"] = "候选人反问"
+        context["pending_stage"] = "finish"
+        context["answer"] = "我想了解团队如何做代码评审。"
+        finish_stage, finish_reason = select_next_junior_stage(
+            context,
+            {"score": 80, "gaps": []},
+            INTERVIEW_MODE_REQUIRED_STAGES["技术面"],
+            INTERVIEW_MODE_OPTIONAL_STAGES["技术面"],
+            8,
+        )
+        self.assertEqual(finish_stage, "finish")
+        self.assertIn("结束", finish_reason)
+
+
+    def test_full_junior_flow_uses_variable_route_and_finishes(self):
+        agent = InterviewAgent.__new__(InterviewAgent)
+        agent.agent = None
+        agent.llm_enabled = False
+        resume = {
+            "targetRole": "Java后端实习", "city": "长沙", "skills": ["Java", "MySQL"],
+            "projects": [{"name": "校园二手交易平台", "role": "后端开发",
+                          "description": "订单和商品接口", "techStack": "Java、Spring Boot、MySQL"}],
+        }
+        job = {
+            "title": "Java后端实习", "company": "测试公司", "city": "长沙",
+            "skills": ["Java", "MySQL"],
+            "jobRequirements": "负责基础接口开发，掌握 Java、MySQL，有测试和调试意识。",
+        }
+        evidence = {
+            "projectName": "校园二手交易平台", "role": "后端开发",
+            "evidenceDetails": {"ownedModules": "订单接口", "testCoverage": "正常下单、库存不足"},
+        }
+        session_id = "adaptive-full-flow"
+        result = agent.start(session_id, resume, job, "初级 · 标准", "技术面", evidence, {}, [])
+        self.assertEqual(result["stage"], "个人背景")
+        self.assertLessEqual(result["targetRounds"], 10)
+
+        answers = [
+            "我负责订单接口，输入是商品和数量，参数为空会返回错误，我测过正常和库存不足。",
+            "请求从Controller进入Service，再通过Mapper写MySQL，我负责订单这一段。",
+            "我使用Java和Spring实现接口，事务保证库存和订单一致。",
+            "如果重复提交我会用状态校验，数据库超时会返回可重试提示。",
+            "我选择事务而不是异步建单，因为当前项目先保证一致性。",
+            "我用正常、异常和边界用例验证，接口返回和日志都能对上。",
+            "我想了解团队如何做代码评审和新人培养。",
+            "我会先补强事务和索引，再参与真实业务。",
+            "我在项目中负责接口测试，也参与过需求拆分和进度同步。",
+            "如果重来一次，我会更早补充日志和异常用例，并增加回归测试。",
+        ]
+        for answer in answers:
+            result = agent.answer(session_id, answer)
+            if result["done"]:
+                break
+
+        route = result["route"]
+        self.assertTrue(result["done"])
+        self.assertIn("候选人反问", route)
+        self.assertEqual(len(route), len(set(route)))
+        self.assertGreaterEqual(len(route), 6)
+        self.assertLessEqual(len(route), 10)
+
+
+    def test_all_direction_questions_obey_one_main_question_rule(self):
+        directions = JUNIOR_REFERENCE.get("direction_stage_patterns") or {}
+        self.assertEqual(len(directions), 8)
+        for direction, stages in directions.items():
+            self.assertGreaterEqual(len(stages), 8, direction)
+            for stage, patterns in stages.items():
+                self.assertTrue(patterns, f"{direction}/{stage}")
+                for question in patterns:
+                    self.assertLessEqual(question.count("？") + question.count("?"), 1, question)
+                    self.assertNotIn("你的一个技术选择", question)
+                    self.assertNotIn("另一个备选方案", question)
+
+
+    def test_missing_decision_evidence_uses_natural_interviewer_question(self):
+        context = {
+            **JUNIOR_CONTEXT,
+            "difficulty": "中级 · 标准",
+            "project_evidence": {
+                "projectName": "校园二手交易平台",
+                "role": "后端开发",
+                "evidenceDetails": {"ownedModules": "订单接口"},
+            },
+        }
+        question = _stage_question(5, context)
+        self.assertIn("什么技术选择", question)
+        self.assertIn("其他做法", question)
+        self.assertNotIn("你的一个技术选择", question)
+        self.assertNotIn("另一个备选方案", question)
+
+    def test_junior_decision_question_never_uses_placeholders(self):
+        question = junior_stage_question("方案取舍", JUNIOR_CONTEXT)
+        self.assertNotIn("你的一个技术选择", question)
+        self.assertNotIn("另一个备选方案", question)
+        self.assertTrue("技术选择" in question or "技术取舍" in question)
+
+    def test_guard_replaces_placeholder_decision_question(self):
+        guarded, reasons = junior_guard_question(
+            "请说明为什么选择“你的一个技术选择”而不是“另一个备选方案”？",
+            "方案取舍",
+            JUNIOR_CONTEXT,
+        )
+        self.assertIn("placeholder-phrase", reasons)
+        self.assertNotIn("你的一个技术选择", guarded)
+        self.assertNotIn("另一个备选方案", guarded)
+        self.assertLessEqual(guarded.count("？") + guarded.count("?"), 1)
+
+
+    def test_undo_removes_last_answer_and_restores_previous_question_state(self):
+        agent = InterviewAgent.__new__(InterviewAgent)
+        agent.agent = None
+        agent.llm_enabled = False
+        agent.checkpointer = None
+        resume = {
+            "targetRole": "Java后端实习", "city": "长沙", "skills": ["Java", "MySQL"],
+            "projects": [{"name": "校园二手交易平台", "role": "后端开发",
+                          "description": "订单和商品接口", "techStack": "Java、Spring Boot、MySQL"}],
+        }
+        job = {
+            "title": "Java后端实习", "company": "测试公司", "city": "长沙",
+            "skills": ["Java", "MySQL"],
+            "jobRequirements": "负责基础接口开发，掌握 Java、MySQL，有测试和调试意识。",
+        }
+        evidence = {
+            "projectName": "校园二手交易平台", "role": "后端开发",
+            "evidenceDetails": {"ownedModules": "订单接口", "testCoverage": "正常下单、库存不足"},
+        }
+        session_id = "undo-one-turn"
+        start = agent.start(session_id, resume, job, "初级 · 标准", "技术面", evidence, {}, [])
+        answered = agent.answer(
+            session_id,
+            "我负责订单接口，输入是商品和数量，参数为空会返回错误，我测过正常和库存不足。",
+        )
+        self.assertEqual(answered["round"], 2)
+        self.assertEqual(answered["stage"], "项目职责")
+
+        undone = agent.undo(session_id)
+        self.assertTrue(undone["undone"])
+        self.assertEqual(undone["round"], 1)
+        self.assertEqual(undone["currentStage"], start["stage"])
+        self.assertEqual(undone["route"], [start["stage"]])
+        snapshot = agent.snapshot(session_id)
+        self.assertEqual(snapshot["history"], [])
+        self.assertFalse(snapshot["done"])
+
+        replaced = agent.answer(
+            session_id,
+            "我主要做了商品页面和订单页面的联调，也写了一些接口测试。",
+        )
+        self.assertEqual(replaced["round"], 2)
+        self.assertNotEqual(replaced["feedback"], answered["feedback"])
+
+    def test_undo_rejects_initial_question_without_answer(self):
+        agent = InterviewAgent.__new__(InterviewAgent)
+        agent.agent = None
+        agent.llm_enabled = False
+        agent.checkpointer = None
+        resume = {"targetRole": "Java后端实习", "city": "长沙", "skills": ["Java"],
+                  "projects": [{"name": "项目A", "role": "后端开发", "description": "接口"}]}
+        job = {"title": "Java后端实习", "company": "测试公司", "city": "长沙",
+               "skills": ["Java"], "jobRequirements": "Java 接口开发"}
+        agent.start("undo-empty", resume, job, "初级 · 标准", "技术面", {"projectName": "项目A"}, {}, [])
+        with self.assertRaises(ValueError):
+            agent.undo("undo-empty")
+
+
+    def test_incorrect_answer_triggers_reason_followup_and_ten_round_cap(self):
+        context = {
+            **JUNIOR_CONTEXT,
+            "round": 3,
+            "current_stage": "技术实现",
+            "answer": "我不会，随便写了一个返回值。",
+            "stage_route": ["个人背景", "项目职责", "技术实现"],
+            "visited_stages": ["个人背景", "项目职责", "技术实现"],
+        }
+        stage, reason = select_next_junior_stage(
+            context,
+            {"score": 45, "gaps": ["个人贡献不够明确", "缺少边界或异常处理"]},
+            INTERVIEW_MODE_REQUIRED_STAGES["技术面"],
+            INTERVIEW_MODE_OPTIONAL_STAGES["技术面"],
+            10,
+        )
+        self.assertEqual(stage, "错误原因")
+        self.assertIn("错误原因", reason)
+        self.assertEqual(context["target_rounds"], 10)
+
+    def test_strong_answer_can_finish_with_six_rounds(self):
+        required = list(INTERVIEW_MODE_REQUIRED_STAGES["技术面"])
+        visited = [stage for stage in required if stage != "候选人反问"]
+        context = {
+            **JUNIOR_CONTEXT,
+            "round": 5,
+            "current_stage": "结果验证",
+            "answer": "我用正常、异常和边界用例验证，接口返回和日志都一致。",
+            "stage_route": visited,
+            "visited_stages": visited,
+        }
+        stage, _ = select_next_junior_stage(
+            context,
+            {"score": 90, "gaps": []},
+            required,
+            INTERVIEW_MODE_OPTIONAL_STAGES["技术面"],
+            10,
+        )
+        self.assertEqual(stage, "候选人反问")
+        self.assertEqual(context["target_rounds"], 6)
+
+
 
 if __name__ == "__main__":
     unittest.main()
+
+

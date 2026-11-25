@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 import json
+import os
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
 import joblib
-import numpy as np
 from sklearn.preprocessing import normalize
 
-MODEL_PATH = Path(r"D:\何处是家乡\data\postgresql\models\tfidf_svd_256.joblib")
+MODEL_PATH = Path(os.getenv(
+    "JOB_EMBEDDING_MODEL",
+    r"D:\何处是家乡\data\postgresql\models\tfidf_svd_256.joblib",
+))
+HOST = os.getenv("JOB_EMBEDDING_HOST", "127.0.0.1")
+PORT = int(os.getenv("JOB_EMBEDDING_PORT", "5001"))
 bundle = joblib.load(MODEL_PATH)
 vectorizer = bundle["vectorizer"]
 svd = bundle["svd"]
@@ -47,13 +54,14 @@ class Handler(BaseHTTPRequestHandler):
                 inputs = [inputs]
             vectors = []
             for text in inputs:
-                X = vectorizer.transform([str(text)])
-                Z = normalize(svd.transform(X), axis=1, norm="l2")
-                vectors.append([float(x) for x in Z[0]])
+                matrix = vectorizer.transform([str(text)])
+                dense = normalize(svd.transform(matrix), axis=1, norm="l2")
+                vectors.append([float(value) for value in dense[0]])
             self.send_json(200, {
                 "object": "list",
                 "model": "tfidf-svd-256",
-                "data": [{"object": "embedding", "index": i, "embedding": v} for i, v in enumerate(vectors)]
+                "data": [{"object": "embedding", "index": i, "embedding": value}
+                         for i, value in enumerate(vectors)]
             })
         except Exception as exc:
             self.send_json(500, {"error": str(exc)})
@@ -69,5 +77,13 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
 
+def main() -> int:
+    if not MODEL_PATH.exists():
+        print("missing embedder: " + str(MODEL_PATH), file=sys.stderr)
+        return 1
+    print("job embedding service on http://{0}:{1}".format(HOST, PORT), flush=True)
+    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
+    return 0
+
 if __name__ == "__main__":
-    ThreadingHTTPServer(("127.0.0.1", 5001), Handler).serve_forever()
+    sys.exit(main())

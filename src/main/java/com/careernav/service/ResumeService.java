@@ -1,5 +1,6 @@
 package com.careernav.service;
 
+import com.careernav.auth.AuthContext;
 import com.careernav.common.BusinessException;
 import com.careernav.domain.ApiModels.ExperienceItem;
 import com.careernav.domain.ApiModels.ProjectItem;
@@ -41,7 +42,11 @@ public class ResumeService {
 
     @Transactional(readOnly = true)
     public List<ResumeView> list() {
-        return repository.findAll(Sort.by(Sort.Direction.DESC, "updatedAt")).stream().map(this::toView).toList();
+        Long userId = AuthContext.userIdOrNull();
+        List<ResumeEntity> rows = userId == null || AuthContext.isAdmin()
+                ? repository.findAll(Sort.by(Sort.Direction.DESC, "updatedAt"))
+                : repository.findByUserIdOrderByUpdatedAtDesc(userId);
+        return rows.stream().map(this::toView).toList();
     }
 
     @Transactional(readOnly = true)
@@ -51,12 +56,16 @@ public class ResumeService {
 
     @Transactional(readOnly = true)
     public ResumeEntity getEntity(Long id) {
-        return repository.findById(id).orElseThrow(() -> new BusinessException("简历不存在：" + id));
+        ResumeEntity entity = repository.findById(id).orElseThrow(() -> new BusinessException("简历不存在：" + id));
+        if (!AuthContext.canAccess(entity.getUserId())) throw new BusinessException("无权访问这份简历");
+        return entity;
     }
 
     @Transactional
     public ResumeView create(ResumePayload payload) {
         ResumeEntity entity = new ResumeEntity();
+        entity.setUserId(AuthContext.userIdOrNull());
+        entity.setDataKind(AuthContext.dataKind());
         copy(payload, entity);
         LocalDateTime now = LocalDateTime.now();
         entity.setCreatedAt(now);
@@ -100,7 +109,7 @@ public class ResumeService {
 
     @Transactional
     public void delete(Long id) {
-        if (!repository.existsById(id)) throw new BusinessException("简历不存在：" + id);
+        getEntity(id);
         verificationRepository.deleteByResumeId(id);
         versionRepository.deleteByResumeId(id);
         repository.deleteById(id);
@@ -125,6 +134,7 @@ public class ResumeService {
                 verification == null ? null : verification.getConfidence(),
                 verification != null && Boolean.TRUE.equals(verification.getPassed()),
                 verification == null ? null : verification.getCheckedAt(),
+                entity.getDataKind() == null ? "LEGACY" : entity.getDataKind(),
                 entity.getCreatedAt(), entity.getUpdatedAt()
         );
     }

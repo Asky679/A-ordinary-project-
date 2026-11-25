@@ -6,6 +6,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -61,6 +63,7 @@ public class LangGraphDiagnosisClient {
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("resumeId", resumeId);
             if (jobId != null) body.put("jobId", jobId);
+            body.put("authorization", currentAuthorization());
             HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + "/v1/diagnosis/analyze"))
                     .timeout(Duration.ofSeconds(150))
                     .header("Content-Type", "application/json")
@@ -105,4 +108,12 @@ public class LangGraphDiagnosisClient {
 
     public record Enrichment(String summary, List<String> strengths, List<Suggestion> suggestions,
                              List<String> learningFocus, String reasoningSummary, List<String> toolCalls) {}
+
+    private String currentAuthorization() {
+        if (RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attributes) {
+            String value = attributes.getRequest().getHeader("Authorization");
+            return value == null ? "" : value;
+        }
+        return "";
+    }
 }

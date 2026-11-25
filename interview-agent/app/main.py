@@ -4,9 +4,10 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from .config import settings
-from .diagnosis_graph import DiagnosisAgent
+from .diagnosis_graph import DiagnosisAgent, api_authorization as diagnosis_api_authorization
 from .graph import InterviewAgent
 from .job_graph import JobRecommendationAgent
+from .job_tools import api_authorization as job_api_authorization
 from .match_graph import MatchAgent
 from .tools import set_context
 
@@ -43,11 +44,13 @@ class JobAgentRequest(BaseModel):
     city: str = ""
     excludedCities: str = ""
     limit: int = 8
+    authorization: str = ""
 
 
 class DiagnosisAgentRequest(BaseModel):
     resumeId: int
     jobId: int | None = None
+    authorization: str = ""
 
 
 class MatchRequest(BaseModel):
@@ -91,6 +94,14 @@ def answer(session_id: str, request: AnswerRequest) -> dict[str, Any]:
     return agent.answer(session_id, request.answer)
 
 
+@app.post("/v1/interviews/{session_id}/undo")
+def undo(session_id: str) -> dict[str, Any]:
+    try:
+        return agent.undo(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @app.get("/v1/interviews/{session_id}")
 def snapshot(session_id: str) -> dict[str, Any]:
     return agent.snapshot(session_id)
@@ -104,13 +115,15 @@ def diagnose_jobs(request: JobAgentRequest) -> dict[str, Any]:
     """
     if request.resumeId is None or request.resumeId <= 0:
         raise HTTPException(status_code=400, detail="resumeId is required")
-    return job_agent.run(request.resumeId, request.city, request.excludedCities, request.limit)
+    with job_api_authorization(request.authorization):
+        return job_agent.run(request.resumeId, request.city, request.excludedCities, request.limit)
 
 
 @app.post("/v1/diagnosis/analyze")
 def analyze_diagnosis(request: DiagnosisAgentRequest) -> dict[str, Any]:
     """简历诊断 Agent：自主决定查哪些证据，返回增强后的诊断建议与工具调用轨迹。"""
-    return diagnosis_agent.analyze(request.resumeId, request.jobId)
+    with diagnosis_api_authorization(request.authorization):
+        return diagnosis_agent.analyze(request.resumeId, request.jobId)
 
 
 @app.post("/v1/match/rerank")

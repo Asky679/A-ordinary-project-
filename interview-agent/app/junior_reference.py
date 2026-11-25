@@ -90,8 +90,8 @@ def _defaults(context: dict[str, Any]) -> dict[str, str]:
         "project": project,
         "skill": skill,
         "owned": ownership,
-        "decision_title": str(details.get("decisionOneTitle") or "你的一个技术选择"),
-        "decision_alt": str(details.get("decisionOneAlternative") or "另一个备选方案"),
+        "decision_title": str(details.get("decisionOneTitle") or "").strip(),
+        "decision_alt": str(details.get("decisionOneAlternative") or "").strip(),
         "test_coverage": str(details.get("testCoverage") or "你的测试范围"),
     }
 
@@ -104,47 +104,67 @@ def _render(template: str, values: dict[str, str]) -> str:
         return template
 
 
+
+_STAGE_ALIASES = {
+    "self_intro": "个人背景",
+    "project": "项目职责",
+    "backend": "技术实现",
+    "python": "技术实现",
+    "system": "故障与边界",
+    "behavior": "团队协作",
+    "motivation": "求职动机",
+    "conflict": "冲突处理",
+    "failure": "失败与学习",
+    "career": "职业规划",
+    "reverse": "候选人反问",
+    "技术判断": "方案取舍",
+    "证据补强": "结果验证",
+    "迁移验证": "方案取舍",
+    "推动改变": "团队协作",
+}
+_TECHNICAL_STAGES = {
+    "项目职责", "项目概述", "业务链路", "技术实现", "基础概念", "故障与取舍",
+    "故障与边界", "方案取舍", "结果验证", "技术判断", "证据补强", "迁移验证", "错误原因",
+}
+
+
+def _canonical_stage(stage: str) -> str:
+    return _STAGE_ALIASES.get(stage, stage)
+
+
+def _direction_stage_candidates(stage: str, context: dict[str, Any]) -> list[str]:
+    direction = infer_direction(context)
+    patterns = ((JUNIOR_REFERENCE.get("direction_stage_patterns") or {}).get(direction) or {}).get(stage) or []
+    values = _defaults(context)
+    return [_render(str(item), values) for item in patterns if str(item).strip()]
+
+
 def junior_question_candidates(
     stage: str,
     context: dict[str, Any],
     keyword: str = "",
     limit: int = 6,
 ) -> list[str]:
-    stage_aliases = {
-        "self_intro": "个人背景",
-        "project": "项目职责",
-        "backend": "技术实现",
-        "python": "技术实现",
-        "system": "故障与边界",
-        "behavior": "团队协作",
-        "motivation": "求职动机",
-        "conflict": "冲突处理",
-        "failure": "失败与学习",
-        "career": "职业规划",
-        "reverse": "候选人反问",
-        "技术判断": "方案取舍",
-        "证据补强": "结果验证",
-        "迁移验证": "方案取舍",
-        "推动改变": "团队协作",
-    }
-    pattern_stage = stage_aliases.get(stage, stage)
-    patterns = (JUNIOR_REFERENCE.get("stage_patterns") or {}).get(pattern_stage) or []
+    pattern_stage = _canonical_stage(stage)
     values = _defaults(context)
     direction = infer_direction(context)
-    candidates = [_render(str(item), values) for item in patterns]
+    direction_stage = _direction_stage_candidates(pattern_stage, context)
+    patterns = (JUNIOR_REFERENCE.get("stage_patterns") or {}).get(pattern_stage) or []
+    keyword = (keyword or "").strip()
+    keyword_questions = []
+    if keyword:
+        keyword_questions = [
+            f"请先用一两句话说明 {keyword} 是什么，再结合项目说你实际怎么用。",
+            f"如果使用 {keyword} 的这段代码遇到空值、重复操作或超时，会发生什么？",
+            f"你当时怎么测试或确认 {keyword} 这部分确实工作正常？",
+        ]
+    candidates = keyword_questions + direction_stage + [_render(str(item), values) for item in patterns]
     direction_patterns = (JUNIOR_REFERENCE.get("direction_patterns") or {}).get(direction) or []
     if direction_patterns:
         focus = str(direction_patterns[(int(context.get("round", 1)) - 1) % len(direction_patterns)])
         candidates.append(f"请结合你的项目，讲一个和“{focus}”有关的真实做法。你当时具体做了什么，怎么验证？")
-    keyword = (keyword or "").strip()
-    if keyword:
-        candidates.extend([
-            f"请先用一两句话说明 {keyword} 是什么，再结合项目说你实际怎么用。",
-            f"如果使用 {keyword} 的这段代码遇到空值、重复操作或超时，会发生什么？",
-            f"你当时怎么测试或确认 {keyword} 这部分确实工作正常？",
-        ])
     voice = JUNIOR_REFERENCE.get("real_interview_voice") or []
-    if stage in {"项目职责", "业务链路", "技术实现", "故障与边界", "故障与取舍"} and voice:
+    if pattern_stage in {"项目职责", "业务链路", "技术实现", "故障与边界", "故障与取舍"} and voice:
         candidates.append(str(voice[(int(context.get("round", 1)) - 1) % len(voice)]))
     deduped: list[str] = []
     for question in candidates:
@@ -154,26 +174,12 @@ def junior_question_candidates(
 
 
 def junior_stage_question(stage: str, context: dict[str, Any]) -> str:
-    stage_aliases = {
-        "self_intro": "个人背景",
-        "project": "项目职责",
-        "backend": "技术实现",
-        "python": "技术实现",
-        "system": "故障与边界",
-        "behavior": "团队协作",
-        "motivation": "求职动机",
-        "conflict": "冲突处理",
-        "failure": "失败与学习",
-        "career": "职业规划",
-        "reverse": "候选人反问",
-        "技术判断": "方案取舍",
-        "证据补强": "结果验证",
-        "迁移验证": "方案取舍",
-        "推动改变": "团队协作",
-    }
-    pattern_stage = stage_aliases.get(stage, stage)
-    raw_patterns = (JUNIOR_REFERENCE.get("stage_patterns") or {}).get(pattern_stage) or []
+    pattern_stage = _canonical_stage(stage)
+    direction_stage = _direction_stage_candidates(pattern_stage, context)
+    if direction_stage:
+        return direction_stage[0]
     values = _defaults(context)
+    raw_patterns = (JUNIOR_REFERENCE.get("stage_patterns") or {}).get(pattern_stage) or []
     candidates = [_render(str(item), values) for item in raw_patterns]
     if candidates:
         offset = sum(ord(char) for char in stage) % len(candidates)
@@ -182,6 +188,99 @@ def junior_stage_question(stage: str, context: dict[str, Any]) -> str:
     if not candidates:
         return "请挑一个你亲手完成的功能，说明你具体做了什么、输入输出是什么，以及你怎么验证。"
     return candidates[0]
+
+
+def select_next_junior_stage(
+    context: dict[str, Any],
+    evaluation: dict[str, Any],
+    required_stages: list[str] | tuple[str, ...],
+    optional_stages: list[str] | tuple[str, ...],
+    max_rounds: int,
+) -> tuple[str, str]:
+    """Choose the next dimension from answer evidence rather than a fixed round table."""
+    current_stage = str(context.get("current_stage") or "")
+    route = list(context.get("stage_route") or context.get("visited_stages") or [])
+    visited = set(context.get("visited_stages") or route)
+    if current_stage and current_stage not in visited:
+        visited.add(current_stage)
+    round_number = int(context.get("round", 1))
+    answer = str(context.get("answer") or "")
+    score = int(evaluation.get("score") or 55)
+    gaps = [str(item) for item in (evaluation.get("gaps") or [])]
+    gap_text = "；".join(gaps)
+    required = [str(item) for item in required_stages]
+    optional = [str(item) for item in optional_stages]
+    reverse = "候选人反问"
+
+    if current_stage == reverse:
+        return "finish", "候选人反问已回答，本场结束"
+
+    if score >= 84:
+        desired_rounds = 6
+    elif score >= 74:
+        desired_rounds = 7
+    elif score >= 64:
+        desired_rounds = 8
+    elif score >= 55:
+        desired_rounds = 9
+    else:
+        desired_rounds = 10
+    desired_rounds = max(6, len(required), min(int(max_rounds), desired_rounds))
+    context["target_rounds"] = desired_rounds
+
+    if round_number >= int(max_rounds) - 1:
+        return reverse, "达到最大轮次上限，保留候选人反问后结束"
+
+    remaining_required = [stage for stage in required if stage not in visited and stage != reverse]
+    if score < 58 and "错误原因" in optional and "错误原因" not in visited and round_number < desired_rounds - 1:
+        return "错误原因", "回答与预期存在明显偏差，先追问理解依据和错误原因，再进入下一维度"
+    if current_stage in {"个人背景", "求职动机", "项目概述"} and "项目职责" in remaining_required:
+        return "项目职责", "先确认候选人本人做了什么，再进入后续技术追问"
+
+    gap_priority: list[tuple[tuple[str, ...], str, str]] = [
+        (("个人贡献", "责任边界"), "项目职责", "上一轮没有讲清个人贡献"),
+        (("没有说明如何验证", "测试", "验证"), "结果验证", "上一轮缺少测试或验证证据"),
+        (("边界", "异常", "空值", "重复", "超时"), "故障与边界", "上一轮没有说明边界或异常处理"),
+        (("架构类词", "缺少具体证据"), "证据补强", "回答出现概括性词汇但缺少项目证据"),
+    ]
+    for terms, stage, reason in gap_priority:
+        if stage in remaining_required and any(term in gap_text for term in terms):
+            return stage, reason
+
+    if remaining_required:
+        if score < 62 and "基础概念" in optional and "基础概念" not in visited and round_number < desired_rounds - 1:
+            return "基础概念", "回答基础信息不足，先补一个基础概念再继续项目追问"
+        seed = sum(ord(char) for char in answer[:120]) + round_number * 17 + score
+        if current_stage == "项目职责":
+            phase_one = [stage for stage in ("业务链路", "技术实现") if stage in remaining_required]
+            if phase_one:
+                return phase_one[seed % len(phase_one)], "先展开业务链路或技术实现，具体先问哪一项取决于当前回答"
+        if current_stage in {"业务链路", "技术实现"}:
+            other = "技术实现" if current_stage == "业务链路" else "业务链路"
+            if other in remaining_required:
+                return other, "补齐项目业务链路与技术实现两项核心证据"
+            if "故障与边界" in remaining_required:
+                return "故障与边界", "核心技术链路已覆盖，继续验证异常与边界意识"
+        if current_stage == "故障与边界" and "结果验证" in remaining_required:
+            return "结果验证", "故障边界之后验证测试、结果与证据"
+        stage = remaining_required[seed % len(remaining_required)]
+        return stage, "按当前回答缺口和本场覆盖要求选择下一维度"
+
+    if round_number + 1 < desired_rounds and score < 82:
+        optional_remaining = [stage for stage in optional if stage not in visited]
+        if optional_remaining:
+            preferred: str | None = None
+            if "架构类词" in gap_text and "方案取舍" in optional_remaining:
+                preferred = "方案取舍"
+            elif score < 62 and "基础概念" in optional_remaining:
+                preferred = "基础概念"
+            elif "验证" in gap_text and "证据补强" in optional_remaining:
+                preferred = "证据补强"
+            seed = sum(ord(char) for char in answer[:120]) + round_number * 23 + score
+            return preferred or optional_remaining[seed % len(optional_remaining)], "回答仍有证据缺口，追加一个针对性追问"
+
+    return reverse, "核心维度已经覆盖，进入候选人反问"
+
 
 
 def junior_guard_question(
@@ -198,6 +297,10 @@ def junior_guard_question(
         reasons.append("multiple-questions-in-one-turn")
     if len(text) > 220:
         reasons.append("question-too-long")
+    placeholders = ("你的一个技术选择", "另一个备选方案", "一个关键技术决策", "未采用的替代方案",
+                    "第二个技术决策", "第二个替代方案")
+    if any(term in text for term in placeholders):
+        reasons.append("placeholder-phrase")
     if reasons:
         return junior_stage_question(stage, context), reasons
     return text, reasons
@@ -220,6 +323,7 @@ def junior_reference_payload(context: dict[str, Any], query: str = "", direction
         },
         "stagePatterns": JUNIOR_REFERENCE.get("stage_patterns") or {},
         "directionPatterns": (JUNIOR_REFERENCE.get("direction_patterns") or {}).get(selected_direction) or [],
+        "directionStagePatterns": (JUNIOR_REFERENCE.get("direction_stage_patterns") or {}).get(selected_direction) or {},
         "basicConceptAreas": JUNIOR_REFERENCE.get("basic_concept_areas") or {},
         "interviewRhythm": JUNIOR_REFERENCE.get("interview_rhythm") or {},
         "companySizePatterns": company_patterns,
@@ -227,7 +331,7 @@ def junior_reference_payload(context: dict[str, Any], query: str = "", direction
         "officialEvidence": (JUNIOR_REFERENCE.get("official_evidence") or [])[:6],
         "realInterviewVoice": JUNIOR_REFERENCE.get("real_interview_voice") or [],
         "query": query,
-        "usageNote": "初级问题必须锚定真实项目或基础概念，一次只问一个主要问题；不要把大规模架构题当作默认门槛。",
+        "usageNote": "初级问题必须锚定真实项目或基础概念，一次只问一个主要问题；优先使用当前岗位方向的方向级问题，并根据上一轮证据缺口动态选择下一维度。",
     }
 
 

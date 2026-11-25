@@ -144,7 +144,28 @@ public final class ApiModels {
                              String educationVerificationStatus, String educationVerificationLabel,
                              Integer educationVerificationScore, Integer educationVerificationConfidence,
                              boolean educationVerified, LocalDateTime educationVerificationCheckedAt,
-                             LocalDateTime createdAt, LocalDateTime updatedAt) {}
+                             String dataKind, LocalDateTime createdAt, LocalDateTime updatedAt) {
+        public ResumeView(Long id, String ownerName, String targetRole, String city, String phone,
+                          String email, String education, String school, String major,
+                          Integer graduationYear, String educationCategory, String duration,
+                          String studyMode, String college, String department, String enrollmentDate,
+                          String studentStatus, String expectedGraduationDate,
+                          List<String> skills, List<ProjectItem> projects,
+                          List<ExperienceItem> experiences, String selfEvaluation, String rawText,
+                          List<InterviewSkillEvidence> interviewSkillEvidence,
+                          String educationVerificationStatus, String educationVerificationLabel,
+                          Integer educationVerificationScore, Integer educationVerificationConfidence,
+                          boolean educationVerified, LocalDateTime educationVerificationCheckedAt,
+                          LocalDateTime createdAt, LocalDateTime updatedAt) {
+            this(id, ownerName, targetRole, city, phone, email, education, school, major,
+                    graduationYear, educationCategory, duration, studyMode, college, department,
+                    enrollmentDate, studentStatus, expectedGraduationDate, skills, projects,
+                    experiences, selfEvaluation, rawText, interviewSkillEvidence,
+                    educationVerificationStatus, educationVerificationLabel, educationVerificationScore,
+                    educationVerificationConfidence, educationVerified, educationVerificationCheckedAt,
+                    "REAL", createdAt, updatedAt);
+        }
+    }
 
     public record JobView(Long id, String externalId, String title, String company, String city,
                           String salary, String education, String experience, List<String> skills,
@@ -167,6 +188,8 @@ public final class ApiModels {
     /** 城市全量岗位库分页结果，page 从 0 开始。 */
     public record CityJobPage(String city, long total, int page, int size,
                               List<JobRecommendation> items) {}
+    public record JobPage(String keyword, String city, long total, int page, int size,
+                          List<JobView> items) {}
 
     /** 职业星图：规则分类后的职业族、方向和岗位统计。 */
     public record CareerLevelCount(String level, long count) {}
@@ -239,10 +262,12 @@ public final class ApiModels {
     public record InterviewView(Long id, Long resumeId, Long jobId, String jobTitle,
                                 String interviewMode, String difficulty, String status,
                                 int currentRound, int totalRounds,
-                                int overallScore, List<InterviewMessage> messages,
+                                int overallScore, String scoringVersion, Integer legacyOverallScore,
+                                boolean scoreComparable, String scoreBand,
+                                List<InterviewMessage> messages,
                                 List<InterviewSkillEvidence> skillEvidence,
                                 InterviewProjectEvidence projectEvidence,
-                                JobInterviewBlueprint jobBlueprint,
+                                JobInterviewBlueprint jobBlueprint, String dataKind,
                                 LocalDateTime startedAt, LocalDateTime updatedAt, LocalDateTime deletedAt) {}
     /** 跨场次候选人故事库中的 STAR+R 故事。 */
     public record CandidateStoryView(Long id, Long resumeId, Long jobId, Long sourceSessionId,
@@ -251,7 +276,7 @@ public final class ApiModels {
                                      String result, String reflection, List<String> competencies,
                                      String evidence, Integer confidence, int usageCount,
                                      LocalDateTime lastUsedAt, LocalDateTime createdAt, LocalDateTime updatedAt,
-                                     LocalDateTime deletedAt) {}
+                                     LocalDateTime deletedAt, String dataKind) {}
     public record DiagnosisRequest(Long resumeId, Long jobId) {}
 
     public record DiagnosisDimension(String name, int score, int weight, String comment) {}
@@ -271,7 +296,7 @@ public final class ApiModels {
                                   LearningPath learningPlan,
                                   String jobMatchSource, Integer ruleMatchScore, Integer agentMatchScore,
                                   List<MatchBreakdown> agentMatchBreakdown,
-                                  LocalDateTime resumeUpdatedAt, LocalDateTime createdAt) {}
+                                  LocalDateTime resumeUpdatedAt, LocalDateTime createdAt, String dataKind) {}
 
     public record LearningPathRequest(@NotNull(message = "请选择简历") Long resumeId,
                                       String targetRole) {}

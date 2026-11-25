@@ -36,6 +36,8 @@ class Settings:
     openai_model: str
     port: int
     max_rounds: int
+    database_url: str
+    state_persistence: bool
 
     @property
     def llm_enabled(self) -> bool:
@@ -48,7 +50,12 @@ def load_settings() -> Settings:
         openai_base_url=os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com/v1").strip(),
         openai_model=os.getenv("OPENAI_MODEL", "deepseek-chat").strip(),
         port=int(os.getenv("LANGGRAPH_PORT", "8001")),
-        max_rounds=int(os.getenv("LANGGRAPH_MAX_ROUNDS", "8")),
+        max_rounds=int(os.getenv("LANGGRAPH_MAX_ROUNDS", "10")),
+        database_url=os.getenv(
+            "CAREERNAV_DB_URL",
+            os.getenv("DATABASE_URL", "postgresql://careernav@127.0.0.1:5432/careernav"),
+        ).strip(),
+        state_persistence=os.getenv("LANGGRAPH_STATE_PERSISTENCE", "true").lower() not in {"0", "false", "off"},
     )
 
 

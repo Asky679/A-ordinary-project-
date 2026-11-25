@@ -36,6 +36,11 @@ public class InterviewController {
         return ApiResponse.ok(service.answer(id, request.answer()));
     }
 
+    @PostMapping("/{id}/undo")
+    public ApiResponse<InterviewView> undo(@PathVariable Long id) {
+        return ApiResponse.ok("已撤回上一轮回答", service.undo(id));
+    }
+
     @DeleteMapping("/{id}")
     public ApiResponse<Void> delete(@PathVariable Long id) {
         service.delete(id);

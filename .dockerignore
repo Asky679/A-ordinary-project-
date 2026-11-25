@@ -1,0 +1,22 @@
+# Build only source code. Large local data and generated artifacts stay on the host.
+.git
+.github-sync
+.idea
+.vscode
+/data
+/output
+/target
+/logs
+/backups
+/.ppt-build
+/tools/qdrant/storage
+/tools/qdrant/*.exe
+/tools/qdrant/*.zip
+interview-agent/.venv
+interview-agent/.env
+interview-agent/__pycache__
+interview-agent/**/__pycache__
+**/*.pyc
+**/*.log
+*.env
+!docker/**/*.env

@@ -11,6 +11,8 @@ LLM 只组织建议，不改分、不编造经历。
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import json
 import os
 from typing import Any
@@ -28,6 +30,21 @@ EMBEDDING_URL = os.getenv("INTERVIEW_EMBEDDING_URL", "http://127.0.0.1:5002/v1/e
 QDRANT_URL = os.getenv("INTERVIEW_QDRANT_URL", "http://127.0.0.1:6333")
 QUESTION_COLLECTION = os.getenv("INTERVIEW_COLLECTION", "careernav_interview_questions")
 TIMEOUT = 90
+_AUTH_HEADER = contextvars.ContextVar("careernav_diagnosis_api_authorization", default="")
+
+
+@contextlib.contextmanager
+def api_authorization(value: str):
+    token = _AUTH_HEADER.set(value or "")
+    try:
+        yield
+    finally:
+        _AUTH_HEADER.reset(token)
+
+
+def _headers() -> dict[str, str]:
+    value = _AUTH_HEADER.get()
+    return {"Authorization": value} if value else {}
 
 SYSTEM_PROMPT = """你是 CareerNav 的简历诊断 Agent。你不是固定模板生成器，而是可以自主选择工具的诊断顾问。
 
@@ -60,7 +77,7 @@ SYSTEM_PROMPT = """你是 CareerNav 的简历诊断 Agent。你不是固定模�
 
 
 def _get(path: str, params: dict | None = None) -> Any:
-    response = requests.get(API_BASE + path, params=params or {}, timeout=TIMEOUT)
+    response = requests.get(API_BASE + path, params=params or {}, headers=_headers(), timeout=TIMEOUT)
     response.raise_for_status()
     body = response.json()
     if isinstance(body, dict) and body.get("success") is False:
@@ -69,7 +86,7 @@ def _get(path: str, params: dict | None = None) -> Any:
 
 
 def _post(path: str, payload: dict) -> Any:
-    response = requests.post(API_BASE + path, json=payload, timeout=TIMEOUT)
+    response = requests.post(API_BASE + path, json=payload, headers=_headers(), timeout=TIMEOUT)
     response.raise_for_status()
     body = response.json()
     if isinstance(body, dict) and body.get("success") is False:

@@ -6,6 +6,7 @@ import com.careernav.domain.ApiModels.AgentMatchResponse;
 import com.careernav.domain.ApiModels.AhpWeightProfile;
 import com.careernav.domain.ApiModels.CityJobCount;
 import com.careernav.domain.ApiModels.CityJobPage;
+import com.careernav.domain.ApiModels.JobPage;
 import com.careernav.domain.ApiModels.JobRecommendation;
 import com.careernav.domain.ApiModels.JobView;
 import com.careernav.domain.JobImport;
@@ -84,6 +85,24 @@ public class JobController {
     @GetMapping("/cities")
     public ApiResponse<List<CityJobCount>> cityCounts() {
         return ApiResponse.ok(jobs.cityCounts());
+    }
+
+    /** 普通岗位浏览：服务端分页返回全部符合条件的 ACTIVE 岗位，不限制前 100 条。 */
+    @GetMapping("/page")
+    public ApiResponse<JobPage> browse(
+            @RequestParam(defaultValue = "") String keyword,
+            @RequestParam(defaultValue = "") String city,
+            @RequestParam(defaultValue = "latest") String sort,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "24") int size,
+            @RequestParam(defaultValue = "") String category,
+            @RequestParam(defaultValue = "") String experience,
+            @RequestParam(defaultValue = "") String education,
+            @RequestParam(defaultValue = "0") int salaryMin,
+            @RequestParam(defaultValue = "") String industry) {
+        JobService.JobFilter filter = new JobService.JobFilter(
+                category, experience, education, salaryMin, industry);
+        return ApiResponse.ok(jobs.browse(keyword, city, sort, page, size, filter));
     }
 
     /** 城市全量岗位库：分页返回指定城市的全部 ACTIVE 岗位。 */

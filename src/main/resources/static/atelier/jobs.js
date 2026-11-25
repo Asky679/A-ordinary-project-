@@ -3,6 +3,7 @@ import { $, $$, esc, chips, options, link, empty, error, showDialog, external, t
 import { getJobSector } from './job-sectors.js';
 import { postingPath, starPath, starTexture } from './job-sky-layout.js';
 import { careerMap } from './career-map.js';
+import { filterDemo } from './auth.js';
 
 function sectorHeader(id, sector, selected){
   const path = 'jobs?work=1&sector='+encodeURIComponent(id);
@@ -145,30 +146,32 @@ export function jobs(root, signal, query){
         matches=await request('/jobs/recommend?'+params({resumeId,limit:100,...filters}),{signal:controller.signal});
         const query=keyword.trim().toLowerCase();
         if(query) matches=matches.filter(({job})=>[job.title,job.company,job.description,...(job.skills||[])].some(value=>String(value||'').toLowerCase().includes(query)));
+      } else if (mode !== 'hybrid') {
+        const data=await request('/jobs/page?'+params({
+          keyword,city,sort:filters.sort,page,size:24,category:filters.category,
+          industry:filters.industry,education:filters.education,
+          experience:filters.experience,salaryMin:filters.salaryMin
+        }),{signal:controller.signal});
+        matches=(data.items || []).map(job=>({job}));
+        total=data.total;
       } else {
-        const keywordSearch = () => request('/jobs?'+params({keyword,city,limit:100}),{signal:controller.signal});
-        let rows;
-        if (mode==='hybrid') {
-          try {
-            rows=await request('/jobs/hybrid?'+params({query:keyword,city,year,limit:100}),{signal:controller.signal});
-          } catch (cause) {
-            if (controller.signal.aborted) throw cause;
-            status.textContent = year ? '混合检索暂时不可用，无法按该年份筛选。' : '混合检索暂时不可用，已显示关键词结果。';
-            status.hidden = false;
-            if (year) { output.innerHTML = empty('暂时无法按年份检索','清除年份后可以继续搜索。'); return; }
-            rows=await keywordSearch();
-          }
-        } else rows=await keywordSearch();
-        const excluded = filters.excludedCities.split(/[,，]/).map(value=>value.trim()).filter(Boolean);
-        matches=rows.filter(job=>{
-          const salary=String(job.salary||'').match(/(\d+(?:\.\d+)?)\s*k/i);
-          return (!resumeId || !excluded.includes(job.city))
-            && (!filters.category || String(job.category||'').includes(filters.category))
-            && (!filters.industry || String(job.industry||'').includes(filters.industry))
-            && (!filters.education || String(job.education||'').includes(filters.education))
-            && (!filters.experience || String(job.experience||'').includes(filters.experience))
-            && (!Number(filters.salaryMin) || (salary && Number(salary[1]) >= Number(filters.salaryMin)));
-        }).map(job=>({job}));
+        const keywordSearch = () => request('/jobs/page?'+params({
+          keyword,city,sort:filters.sort,page,size:24,category:filters.category,
+          industry:filters.industry,education:filters.education,
+          experience:filters.experience,salaryMin:filters.salaryMin
+        }),{signal:controller.signal});
+        try {
+          const rows=await request('/jobs/hybrid?'+params({query:keyword,city,year,limit:100}),{signal:controller.signal});
+          matches=rows.map(job=>({job}));
+        } catch (cause) {
+          if (controller.signal.aborted) throw cause;
+          status.textContent = year ? '混合检索暂时不可用，无法按该年份筛选。' : '混合检索暂时不可用，已切换为全量关键词分页。';
+          status.hidden = false;
+          if (year) { output.innerHTML = empty('暂时无法按年份检索','清除年份后可以继续搜索。'); return; }
+          const data=await keywordSearch();
+          matches=(data.items || []).map(job=>({job}));
+          total=data.total;
+        }
       }
       if(controller.signal.aborted) return;
       resultList=matches;
@@ -244,9 +247,10 @@ export function jobs(root, signal, query){
   Promise.allSettled([request('/jobs/cities',{signal}),request('/resumes',{signal})]).then(([cities,resumes])=>{
     if(signal.aborted)return;
     if(cities.status==='fulfilled') form.elements.city.insertAdjacentHTML('beforeend',cities.value.map(item=>`<option value="${esc(item.city)}">${esc(item.city)} · ${esc(item.count)}</option>`).join(''));
-    if(resumes.status==='fulfilled') form.elements.resumeId.insertAdjacentHTML('beforeend',options(resumes.value,'',item=>item.ownerName+' · '+item.targetRole));
+    const resumeItems = resumes.status==='fulfilled' ? filterDemo(resumes.value) : [];
+    if(resumes.status==='fulfilled') form.elements.resumeId.insertAdjacentHTML('beforeend',options(resumeItems,'',item=>item.ownerName+' · '+item.targetRole));
     setSearchMode(searchMode);
-    if(searchMode==='match' && !form.elements.resumeId.value && resumes.status==='fulfilled' && resumes.value.length) form.elements.resumeId.value = String(resumes.value[0].id);
+    if(searchMode==='match' && !form.elements.resumeId.value && resumeItems.length) form.elements.resumeId.value = String(resumeItems[0].id);
     for (const name of filterNames) {
       let value = query.get(name);
       if (name==='excludedCities' && value===null) {
