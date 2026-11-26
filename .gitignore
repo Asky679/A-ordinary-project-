@@ -27,13 +27,9 @@ interview-agent/data/interview-experiences/*
 !interview-agent/data/interview-experiences/patterns.jsonl
 !interview-agent/data/interview-experiences/sources.md
 
-# Docker runtime data and secrets
+# Local runtime data and secrets
 .env
 backups/
 logs/*
 !logs/.gitkeep
-docker/seed/postgres/*
-docker/seed/qdrant/*
-!docker/seed/postgres/.gitkeep
-!docker/seed/qdrant/.gitkeep
 data/models/

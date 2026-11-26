@@ -109,21 +109,6 @@ Spring Boot REST API
 
 详细设计见 [docs/architecture.md](docs/architecture.md)。
 
-## 一键 Docker 部署
-
-项目根目录提供 `compose.yml`，统一编排 PostgreSQL、Qdrant、两个 Embedding 服务、LangGraph Agent 和 Spring Boot。
-
-```bash
-cp .env.docker.example .env
-./ops/docker/prepare-seed.sh output/careernav-database-package-2026-11-25.zip
-docker compose up -d --build
-```
-
-完整的环境变量、种子导入、健康检查、日志、备份和恢复步骤见
-[docs/deployment-docker.md](docs/deployment-docker.md)。
-
-> `docker/seed`、`data/models`、`.env` 和备份文件均被版本库忽略，需要单独部署到服务器。
-
 ## 快速启动
 
 环境要求：
